@@ -6,14 +6,63 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def get_anthropic_api_key() -> str:
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("ANTHROPIC_API_KEY environment variable not set")
+    return key
+
+
+def get_github_token() -> str:
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise RuntimeError("GITHUB_TOKEN environment variable not set")
+    return token
+
+
+def parse_issue_url(url: str) -> tuple[str, str, int]:
+    """Parse GitHub issue URL into (owner, repo, issue_number)."""
+    match = re.match(
+        r"https?://github\.com/([^/]+)/([^/]+)/issues/(\d+)",
+        url.strip(),
+    )
+    if not match:
+        raise ValueError(
+            f"Invalid GitHub issue URL: {url!r}\n"
+            "Expected format: https://github.com/owner/repo/issues/NUMBER"
+        )
+    return match.group(1), match.group(2), int(match.group(3))
+
+
+def repo_id_from_url(repo_url: str) -> str:
+    """Convert repo URL to repo_id slug (owner-repo)."""
+    match = re.match(r"https?://github\.com/([^/]+)/([^/]+)/?", repo_url.strip())
+    if not match:
+        raise ValueError(f"Invalid GitHub repo URL: {repo_url!r}")
+    owner = match.group(1)
+    repo = match.group(2).removesuffix(".git")
+    return f"{owner}-{repo}"
+
+
+def parse_repo_url(repo_url: str) -> tuple[str, str]:
+    """Parse GitHub repo URL into (owner, repo)."""
+    match = re.match(r"https?://github\.com/([^/]+)/([^/]+)/?", repo_url.strip())
+    if not match:
+        raise ValueError(f"Invalid GitHub repo URL: {repo_url!r}")
+    owner = match.group(1)
+    repo = match.group(2).removesuffix(".git")
+    return owner, repo
+
+
+# Backward compatibility for existing tests
 @dataclass
 class RepoCraftConfig:
     repo_url: str
     issue_number: int
     owner: str = field(init=False)
     repo: str = field(init=False)
-    container_image: str = "repocraft-base:latest"
-    model: str = "claude-sonnet-4-5-20251001"
+    container_image: str = "repocraft-worker:v1"
+    model: str = "claude-sonnet-4-6"
     max_turns_per_phase: int = 30
     max_budget_usd: float = 10.0
     output_dir: Path = field(default_factory=lambda: Path("output"))
@@ -22,13 +71,6 @@ class RepoCraftConfig:
     )
 
     def __post_init__(self) -> None:
-        match = re.match(
-            r"https?://github\.com/([^/]+)/([^/]+)/?",
-            self.repo_url,
-        )
-        if not match:
-            raise ValueError(f"Cannot parse GitHub repo URL: {self.repo_url!r}")
-        self.owner = match.group(1)
-        self.repo = match.group(2)
+        self.owner, self.repo = parse_repo_url(self.repo_url)
         self.output_dir = Path(self.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)

@@ -175,13 +175,13 @@ class ContainerManager:
         logger.debug("exec [%d]: %s", exit_code, command[:80])
         return ExecResult(exit_code=exit_code, stdout=stdout, stderr=stderr)
 
-    async def exec_stream(self, command: str, workdir: str = "/repos") -> AsyncIterator[str]:
-        """Yield stdout lines in real-time using asyncio.Queue + thread executor."""
+    async def exec_stream(self, command: str, workdir: str = "/repos") -> AsyncIterator[tuple[str | None, int | None]]:
+        """Yield (line, None) tuples, then final (None, exit_code) tuple."""
         container = self._get_container()
         if container is None or container.status != "running":
             raise RuntimeError("Container not running")
 
-        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        queue: asyncio.Queue[tuple[str | None, int | None]] = asyncio.Queue()
         loop = asyncio.get_event_loop()
 
         def _stream_thread() -> None:
@@ -192,16 +192,20 @@ class ContainerManager:
             )
             for chunk in container.client.api.exec_start(exec_id["Id"], stream=True):
                 line = chunk.decode(errors="replace")
-                loop.call_soon_threadsafe(queue.put_nowait, line)
-            loop.call_soon_threadsafe(queue.put_nowait, None)
+                loop.call_soon_threadsafe(queue.put_nowait, (line, None))
+
+            # Get exit code after stream completes
+            inspect = container.client.api.exec_inspect(exec_id["Id"])
+            exit_code = inspect.get("ExitCode", 1)
+            loop.call_soon_threadsafe(queue.put_nowait, (None, exit_code))
 
         loop.run_in_executor(None, _stream_thread)
 
         while True:
-            line = await queue.get()
-            if line is None:
+            item = await queue.get()
+            yield item
+            if item[0] is None:  # Exit code sentinel
                 break
-            yield line
 
     def ensure_repo(self, repo_id: str, repo_url: str) -> None:
         """Clone repo if not present. repo_id = 'owner-repo' slug."""
