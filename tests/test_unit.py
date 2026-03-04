@@ -312,6 +312,88 @@ def test_poller_unknown_event_type():
     assert _parse_event(raw) is None
 
 
+def test_poller_mention_on_pr_includes_instruction():
+    """Mention trigger must include the instruction text, not just 'pr:N'."""
+    raw = {
+        "id": "evt-6",
+        "type": "IssueCommentEvent",
+        "payload": {
+            "action": "created",
+            "comment": {"body": "@repocraft fix the conflicts"},
+            "issue": {
+                "number": 2,
+                "pull_request": {"url": "https://github.com/owner/repo/pulls/2"},
+            },
+        },
+    }
+    event = _parse_event(raw)
+    assert event is not None
+    assert event.event_type == "mention"
+    # Trigger must carry the instruction, not just the PR number
+    assert "fix the conflicts" in event.trigger
+    assert event.trigger.startswith("pr:2:")
+
+
+def test_poller_mention_on_issue_includes_instruction():
+    """Mention trigger on issue must include instruction text."""
+    raw = {
+        "id": "evt-7",
+        "type": "IssueCommentEvent",
+        "payload": {
+            "action": "created",
+            "comment": {"body": "@repocraft add unit tests"},
+            "issue": {"number": 5},
+        },
+    }
+    event = _parse_event(raw)
+    assert event is not None
+    assert event.event_type == "mention"
+    assert "add unit tests" in event.trigger
+    assert event.trigger.startswith("issue:5:")
+
+
+# --- Task prompt ---
+
+from repocraft.dispatcher import _build_prompt
+
+
+def test_task_prompt_pr_mention_includes_reply_instruction():
+    """Task prompt for PR mention must tell agent to reply on the PR."""
+    import asyncio
+
+    async def _get():
+        activity = {"kind": "task", "trigger": "pr:2:fix the conflicts"}
+        repo = {"repo_url": "https://github.com/owner/repo"}
+        return await _build_prompt(activity, repo, github_token="")
+
+    prompt = asyncio.run(_get())
+    assert "fix the conflicts" in prompt
+    assert "gh pr comment" in prompt  # Must instruct to reply
+    assert "PR #2" in prompt or "pr/2" in prompt.lower()
+
+
+def test_task_prompt_issue_mention_includes_reply_instruction():
+    """Task prompt for issue mention must tell agent to reply on the issue."""
+    import asyncio
+
+    async def _get():
+        activity = {"kind": "task", "trigger": "issue:5:add unit tests"}
+        repo = {"repo_url": "https://github.com/owner/repo"}
+        return await _build_prompt(activity, repo, github_token="")
+
+    prompt = asyncio.run(_get())
+    assert "add unit tests" in prompt
+    assert "gh issue comment" in prompt  # Must instruct to reply
+
+
+def test_user_claude_md_task_has_reply_rule():
+    """user_claude_md task section must include reply-to-PR/issue rule."""
+    from repocraft.templates.user_claude_md import get_user_claude_md
+    md = get_user_claude_md()
+    task_section = md[md.index("### `task`"):]
+    assert "gh pr comment" in task_section or "reply" in task_section.lower()
+
+
 # --- Prompts ---
 
 from repocraft.templates.prompts import (
