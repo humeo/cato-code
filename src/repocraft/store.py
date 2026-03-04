@@ -11,6 +11,10 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS repos (
     id TEXT PRIMARY KEY,
     repo_url TEXT NOT NULL,
+    watch INTEGER DEFAULT 0,
+    last_etag TEXT,
+    last_poll_at TEXT,
+    patrol_interval_hours INTEGER DEFAULT 12,
     created_at TEXT NOT NULL
 );
 
@@ -33,7 +37,31 @@ CREATE TABLE IF NOT EXISTS logs (
     line TEXT NOT NULL,
     ts TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS processed_events (
+    repo_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    event_type TEXT,
+    processed_at TEXT NOT NULL,
+    UNIQUE(repo_id, event_id)
+);
+
+CREATE TABLE IF NOT EXISTS patrol_budget (
+    repo_id TEXT PRIMARY KEY,
+    window_start TEXT NOT NULL,
+    issues_filed INTEGER DEFAULT 0,
+    max_issues INTEGER DEFAULT 5,
+    window_hours INTEGER DEFAULT 12
+);
 """
+
+# Migrations: columns added after initial schema
+_MIGRATIONS = [
+    "ALTER TABLE repos ADD COLUMN watch INTEGER DEFAULT 0",
+    "ALTER TABLE repos ADD COLUMN last_etag TEXT",
+    "ALTER TABLE repos ADD COLUMN last_poll_at TEXT",
+    "ALTER TABLE repos ADD COLUMN patrol_interval_hours INTEGER DEFAULT 12",
+]
 
 
 def _now() -> str:
@@ -52,6 +80,16 @@ class Store:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
         self._conn.commit()
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Apply schema migrations idempotently (ignore errors for existing columns)."""
+        for migration in _MIGRATIONS:
+            try:
+                self._conn.execute(migration)
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
     # --- repos ---
 
@@ -72,6 +110,22 @@ class Store:
         with self._lock:
             cur = self._conn.execute("SELECT * FROM repos ORDER BY created_at")
             return cur.fetchall()
+
+    def list_watched_repos(self) -> list[sqlite3.Row]:
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM repos WHERE watch = 1 ORDER BY created_at")
+            return cur.fetchall()
+
+    def update_repo(self, repo_id: str, **fields: object) -> None:
+        if not fields:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [repo_id]
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE repos SET {set_clause} WHERE id = ?", values
+            )
+            self._conn.commit()
 
     # --- activities ---
 
@@ -134,6 +188,17 @@ class Store:
                 )
             return cur.fetchall()
 
+    def mark_crashed_activities_failed(self) -> int:
+        """On daemon startup, mark any status=running activities as failed (previous crash)."""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE activities SET status = 'failed', summary = 'Interrupted (daemon restarted)'"
+                ", updated_at = ? WHERE status = 'running'",
+                (_now(),),
+            )
+            self._conn.commit()
+            return cur.rowcount
+
     # --- logs ---
 
     def add_log(self, activity_id: str, line: str) -> None:
@@ -144,6 +209,19 @@ class Store:
             )
             self._conn.commit()
 
+    def add_logs_batch(self, activity_id: str, lines: list[str]) -> None:
+        """Batch-insert log lines for better I/O performance."""
+        if not lines:
+            return
+        now = _now()
+        rows = [(activity_id, line, now) for line in lines]
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO logs (activity_id, line, ts) VALUES (?, ?, ?)",
+                rows,
+            )
+            self._conn.commit()
+
     def get_logs(self, activity_id: str) -> list[sqlite3.Row]:
         with self._lock:
             cur = self._conn.execute(
@@ -151,3 +229,73 @@ class Store:
                 (activity_id,),
             )
             return cur.fetchall()
+
+    # --- processed events ---
+
+    def is_event_processed(self, repo_id: str, event_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT 1 FROM processed_events WHERE repo_id = ? AND event_id = ?",
+                (repo_id, event_id),
+            )
+            return cur.fetchone() is not None
+
+    def mark_event_processed(self, repo_id: str, event_id: str, event_type: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR IGNORE INTO processed_events
+                   (repo_id, event_id, event_type, processed_at)
+                   VALUES (?, ?, ?, ?)""",
+                (repo_id, event_id, event_type, _now()),
+            )
+            self._conn.commit()
+
+    # --- patrol budget ---
+
+    def get_patrol_budget(self, repo_id: str) -> int:
+        """Return remaining issues budget for this patrol window. Resets when window expires."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM patrol_budget WHERE repo_id = ?", (repo_id,)
+            )
+            row = cur.fetchone()
+
+        if row is None:
+            return 5  # Default budget for new repos
+
+        # Check if window has expired
+        window_start = datetime.fromisoformat(row["window_start"])
+        window_hours = row["window_hours"]
+        elapsed_hours = (datetime.now(timezone.utc) - window_start).total_seconds() / 3600
+
+        if elapsed_hours >= window_hours:
+            # Reset window
+            with self._lock:
+                self._conn.execute(
+                    "UPDATE patrol_budget SET window_start = ?, issues_filed = 0 WHERE repo_id = ?",
+                    (_now(), repo_id),
+                )
+                self._conn.commit()
+            return row["max_issues"]
+
+        return max(0, row["max_issues"] - row["issues_filed"])
+
+    def init_patrol_budget(self, repo_id: str, max_issues: int = 5, window_hours: int = 12) -> None:
+        """Initialize patrol budget for a repo (idempotent)."""
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR IGNORE INTO patrol_budget
+                   (repo_id, window_start, issues_filed, max_issues, window_hours)
+                   VALUES (?, ?, 0, ?, ?)""",
+                (repo_id, _now(), max_issues, window_hours),
+            )
+            self._conn.commit()
+
+    def decrement_patrol_budget(self, repo_id: str) -> None:
+        """Record that one issue was filed in the current patrol window."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE patrol_budget SET issues_filed = issues_filed + 1 WHERE repo_id = ?",
+                (repo_id,),
+            )
+            self._conn.commit()

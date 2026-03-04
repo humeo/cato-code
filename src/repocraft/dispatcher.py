@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
 from typing import TYPE_CHECKING
@@ -9,12 +8,22 @@ from typing import TYPE_CHECKING
 from .config import parse_repo_url, repo_id_from_url
 from .github.issue_fetcher import fetch_issue
 from .templates.init_prompt import get_init_prompt
+from .templates.prompts import (
+    fix_issue_prompt,
+    patrol_prompt,
+    respond_review_prompt,
+    review_pr_prompt,
+    triage_prompt,
+)
 
 if TYPE_CHECKING:
     from .container.manager import ContainerManager
     from .store import Store
 
 logger = logging.getLogger(__name__)
+
+IDLE_TIMEOUT_SECS = 600   # 10 minutes without output → kill
+HARD_TIMEOUT_SECS = 7200  # 2 hours absolute maximum
 
 
 async def dispatch(
@@ -27,8 +36,7 @@ async def dispatch(
     max_turns: int = 200,
     verbose: bool = False,
 ) -> None:
-    """
-    Dispatch a single activity: ensure container/repo ready, run claude -p, stream logs to DB.
+    """Dispatch a single activity: ensure container/repo ready, run SDK runner, stream logs to DB.
 
     Updates activity status: pending → running → done|failed
     """
@@ -59,10 +67,11 @@ async def dispatch(
         if needs_init:
             logger.info("Repo %s needs init, running init activity first", repo_id)
             init_activity_id = store.add_activity(repo_id, "init", "auto")
-            await _run_init(init_activity_id, repo_id, store, container_mgr, max_turns, verbose)
+            await _run_init(init_activity_id, repo_id, store, container_mgr, verbose)
 
-        # 4. Reset repo to clean state
-        container_mgr.reset_repo(repo_id)
+        # 4. Reset repo to clean state (skip for respond_review — needs existing PR branch)
+        if activity["kind"] != "respond_review":
+            container_mgr.reset_repo(repo_id)
 
         # 5. Build prompt based on activity kind
         prompt = await _build_prompt(activity, repo, github_token)
@@ -70,30 +79,46 @@ async def dispatch(
         # 6. Update status to running
         store.update_activity(activity_id, status="running")
 
-        # 7. Execute claude -p and stream logs
-        exit_code = await _execute_claude(
+        # 7. Determine session resume for respond_review
+        resume_session_id = None
+        if activity["kind"] == "respond_review":
+            resume_session_id = _find_original_session_id(activity, store)
+
+        # 8. Execute SDK runner and stream logs
+        exit_code, session_id, cost_usd = await _execute_sdk_runner(
             activity_id=activity_id,
             repo_id=repo_id,
             prompt=prompt,
             store=store,
             container_mgr=container_mgr,
             max_turns=max_turns,
+            session_id=resume_session_id,
             verbose=verbose,
         )
 
-        # 8. Extract summary from last few log lines
+        # 9. Extract summary from result line
         summary = _extract_summary(store.get_logs(activity_id))
 
-        # 9. Update final status
+        # 10. Update final status and session_id for future resume
         if exit_code == 0:
-            store.update_activity(activity_id, status="done", summary=summary)
-            logger.info("Activity %s completed successfully", activity_id)
+            store.update_activity(
+                activity_id,
+                status="done",
+                summary=summary,
+                session_id=session_id,
+            )
+            logger.info("Activity %s completed (cost=$%.4f)", activity_id, cost_usd or 0)
         else:
-            store.update_activity(activity_id, status="failed", summary=summary)
+            store.update_activity(
+                activity_id,
+                status="failed",
+                summary=summary,
+                session_id=session_id,
+            )
             logger.warning("Activity %s failed with exit code %d", activity_id, exit_code)
 
     except asyncio.TimeoutError:
-        store.update_activity(activity_id, status="failed", summary="Timeout after 2 hours")
+        store.update_activity(activity_id, status="failed", summary="Timeout")
         logger.error("Activity %s timed out", activity_id)
         raise
     except Exception as e:
@@ -107,26 +132,25 @@ async def _run_init(
     repo_id: str,
     store: Store,
     container_mgr: ContainerManager,
-    max_turns: int,
     verbose: bool,
 ) -> None:
     """Run init activity to explore repo and generate CLAUDE.md."""
     prompt = get_init_prompt()
     store.update_activity(activity_id, status="running")
 
-    exit_code = await _execute_claude(
+    exit_code, session_id, _ = await _execute_sdk_runner(
         activity_id=activity_id,
         repo_id=repo_id,
         prompt=prompt,
         store=store,
         container_mgr=container_mgr,
-        max_turns=30,  # Init uses fixed 30 turns
+        max_turns=50,  # Init uses more generous 50 turns for thorough exploration
         verbose=verbose,
     )
 
     summary = _extract_summary(store.get_logs(activity_id))
     if exit_code == 0:
-        store.update_activity(activity_id, status="done", summary=summary)
+        store.update_activity(activity_id, status="done", summary=summary, session_id=session_id)
         logger.info("Init activity %s completed", activity_id)
     else:
         store.update_activity(activity_id, status="failed", summary=summary)
@@ -134,198 +158,194 @@ async def _run_init(
 
 
 async def _build_prompt(activity: dict, repo: dict, github_token: str) -> str:
-    """Build prompt based on activity kind."""
+    """Build prompt based on activity kind using typed prompt templates."""
     kind = activity["kind"]
-    trigger = activity["trigger"]
+    trigger = activity["trigger"] or ""
+    owner, repo_name = parse_repo_url(repo["repo_url"])
 
     if kind == "init":
         return get_init_prompt()
 
     elif kind == "fix_issue":
-        # Parse issue number from trigger (format: "issue:123")
-        if not trigger or not trigger.startswith("issue:"):
-            raise ValueError(f"Invalid trigger for fix_issue: {trigger}")
+        # Trigger format: "issue:123"
+        if not trigger.startswith("issue:"):
+            raise ValueError(f"Invalid trigger for fix_issue: {trigger!r}")
         issue_number = int(trigger.split(":", 1)[1])
-
-        # Fetch issue from GitHub
-        owner, repo_name = parse_repo_url(repo["repo_url"])
         issue = await fetch_issue(owner, repo_name, issue_number, github_token)
-
-        # Build detailed prompt
-        prompt_parts = [
-            f"# Fix GitHub Issue #{issue.number}",
-            f"",
-            f"**URL**: {issue.url}",
-            f"**Author**: {issue.author}",
-            f"**Labels**: {', '.join(issue.labels) if issue.labels else 'none'}",
-            f"",
-            f"## Title",
-            f"{issue.title}",
-            f"",
-            f"## Description",
-            f"{issue.body}",
-        ]
-
-        if issue.comments:
-            prompt_parts.append("")
-            prompt_parts.append("## Comments")
-            for i, comment in enumerate(issue.comments, 1):
-                prompt_parts.append(f"### Comment {i}")
-                prompt_parts.append(comment)
-                prompt_parts.append("")
-
-        prompt_parts.extend([
-            "",
-            "## Your Task",
-            "",
-            "1. Understand the issue thoroughly",
-            "2. Reproduce the bug or understand the feature request",
-            "3. Implement a minimal, targeted fix",
-            "4. Run tests to verify the fix works",
-            "5. Commit your changes with a clear message",
-            "6. Create a pull request using `gh pr create`",
-            "",
-            f"Use branch name: `repocraft/fix/{issue_number}-{_slugify(issue.title)}`",
-            "",
-            "The PR should include:",
-            "- Clear title referencing the issue",
-            "- Description of what changed and why",
-            "- Test output showing the fix works",
-        ])
-
-        return "\n".join(prompt_parts)
-
-    elif kind == "task":
-        # Free-form instruction from user
-        return trigger or "Execute the task as described."
-
-    elif kind == "scan":
-        return """\
-Perform a comprehensive audit of this codebase. Look for:
-
-1. **Security Issues**
-   - Hardcoded secrets or credentials
-   - SQL injection vulnerabilities
-   - XSS vulnerabilities
-   - Insecure dependencies (check for CVEs)
-   - Unsafe file operations
-
-2. **Code Quality**
-   - Obvious bugs or logic errors
-   - Dead code or unused imports
-   - Code smells (long functions, deep nesting, etc.)
-   - Missing error handling
-
-3. **Dependencies**
-   - Outdated packages (major versions behind)
-   - Deprecated dependencies
-   - Unused dependencies
-
-4. **Testing**
-   - Missing test coverage for critical paths
-   - Flaky or broken tests
-
-5. **Documentation**
-   - Missing or outdated README
-   - Undocumented public APIs
-   - Missing inline comments for complex logic
-
-For each finding:
-- Create a GitHub issue with clear description and severity label
-- OR if it's a simple fix, fix it directly and create a PR
-
-Before creating issues, search existing issues to avoid duplicates.
-"""
-
-    elif kind == "respond_review":
-        return f"""\
-A pull request has received review comments. Your task:
-
-1. Read all review comments carefully
-2. Address each comment by either:
-   - Fixing the code as requested
-   - Replying to explain why the current approach is correct
-3. Push new commits to the PR branch
-4. Do NOT force-push unless explicitly requested by reviewer
-
-Review comments:
-{trigger}
-"""
+        return fix_issue_prompt(
+            issue_number=issue.number,
+            issue_title=issue.title,
+            issue_body=issue.body,
+            repo_owner=owner,
+            repo_name=repo_name,
+        )
 
     elif kind == "triage":
-        return f"""\
-A new issue has been created. Your task:
+        # Trigger format: "issue:123"
+        if not trigger.startswith("issue:"):
+            raise ValueError(f"Invalid trigger for triage: {trigger!r}")
+        issue_number = int(trigger.split(":", 1)[1])
+        issue = await fetch_issue(owner, repo_name, issue_number, github_token)
+        return triage_prompt(
+            issue_number=issue.number,
+            issue_title=issue.title,
+            issue_body=issue.body,
+            issue_author=issue.author,
+        )
 
-1. Read the issue carefully
-2. Determine if it's a bug, feature request, question, or duplicate
-3. Reply with a brief, helpful comment
-4. Apply appropriate labels if you have permission
-5. If it's a duplicate, link to the original issue
+    elif kind == "patrol":
+        # Trigger format: "budget:N" or None
+        budget = 5  # default
+        if trigger.startswith("budget:"):
+            budget = int(trigger.split(":", 1)[1])
+        return patrol_prompt(repo_id=repo["id"], budget_remaining=budget)
 
-Issue content:
-{trigger}
-"""
+    elif kind == "task":
+        # Free-form instruction; trigger is the full instruction text
+        return trigger or "Execute the task as described."
+
+    elif kind == "respond_review":
+        # Trigger format: "pr:123"
+        if not trigger.startswith("pr:"):
+            raise ValueError(f"Invalid trigger for respond_review: {trigger!r}")
+        pr_number = int(trigger.split(":", 1)[1])
+        return respond_review_prompt(pr_number=pr_number, review_comments="(Read from the PR itself using `gh pr view {pr_number} --comments`)")
+
+    elif kind == "review_pr":
+        # Trigger format: "pr:123"
+        if not trigger.startswith("pr:"):
+            raise ValueError(f"Invalid trigger for review_pr: {trigger!r}")
+        pr_number = int(trigger.split(":", 1)[1])
+        return review_pr_prompt(pr_number=pr_number, pr_title="(Read from the PR)", pr_diff="(Use `gh pr diff {pr_number}` to get the diff)")
 
     else:
-        raise ValueError(f"Unknown activity kind: {kind}")
+        raise ValueError(f"Unknown activity kind: {kind!r}")
 
 
-async def _execute_claude(
+def _find_original_session_id(activity: dict, store: Store) -> str | None:
+    """For respond_review, find the session_id from the original fix_issue activity."""
+    trigger = activity.get("trigger") or ""
+    if not trigger.startswith("pr:"):
+        return None
+    # Look for a fix_issue or review_pr activity on this repo that has a session_id
+    activities = store.list_activities(repo_id=activity["repo_id"])
+    for a in reversed(list(activities)):
+        if a["kind"] in ("fix_issue", "review_pr") and a["session_id"]:
+            logger.debug("Resuming session %s for respond_review", a["session_id"])
+            return a["session_id"]
+    return None
+
+
+async def _execute_sdk_runner(
     activity_id: str,
     repo_id: str,
     prompt: str,
     store: Store,
     container_mgr: ContainerManager,
     max_turns: int,
-    verbose: bool,
-) -> int:
-    """Execute claude -p command and stream output to DB. Returns exit code."""
-    # Base64 encode prompt to avoid shell escaping issues
-    prompt_b64 = base64.b64encode(prompt.encode()).decode()
+    session_id: str | None = None,
+    verbose: bool = False,
+) -> tuple[int, str | None, float | None]:
+    """Execute SDK runner and stream JSONL output to DB.
 
-    # Build claude command
-    cmd_parts = [
-        f"cd /repos/{repo_id}",
-        f"claude -p \"$(echo {prompt_b64} | base64 -d)\"",
-        "--output-format stream-json",
-        "--dangerously-skip-permissions",
-        f"--max-turns {max_turns}",
-    ]
-    if verbose:
-        cmd_parts.append("--verbose")
+    Returns (exit_code, session_id, cost_usd).
 
-    command = " && ".join([cmd_parts[0], " ".join(cmd_parts[1:])])
-
-    logger.debug("Executing: %s", command[:200])
-
-    # Stream output and log each line
+    Two-layer timeout:
+    - Idle timeout: IDLE_TIMEOUT_SECS seconds without any output
+    - Hard timeout: HARD_TIMEOUT_SECS seconds absolute
+    """
+    cwd = f"/repos/{repo_id}"
     line_count = 0
-    exit_code = 1  # Default to failure
-    async for line, code in container_mgr.exec_stream(command, workdir=f"/repos/{repo_id}"):
-        if line is not None:
-            store.add_log(activity_id, line)
-            line_count += 1
-            if line_count % 100 == 0:
-                logger.debug("Logged %d lines for activity %s", line_count, activity_id)
-        else:
-            # Final tuple with exit code
-            exit_code = code or 1
+    exit_code = 1
+    result_session_id: str | None = None
+    result_cost_usd: float | None = None
 
-    logger.info("Claude command completed with exit code %d (%d lines logged)", exit_code, line_count)
-    return exit_code
+    log_batch: list[str] = []
+
+    async def _flush_batch() -> None:
+        nonlocal log_batch
+        if log_batch:
+            for line in log_batch:
+                store.add_log(activity_id, line)
+            log_batch = []
+
+    async def _stream_with_idle_timeout() -> tuple[int, str | None, float | None]:
+        nonlocal line_count, exit_code, result_session_id, result_cost_usd
+
+        last_output_time = asyncio.get_event_loop().time()
+
+        async for line, code in container_mgr.exec_sdk_runner(
+            prompt=prompt,
+            cwd=cwd,
+            max_turns=max_turns,
+            session_id=session_id,
+        ):
+            now = asyncio.get_event_loop().time()
+            idle_secs = now - last_output_time
+
+            if idle_secs > IDLE_TIMEOUT_SECS:
+                logger.warning(
+                    "Activity %s idle for %.0fs — killing", activity_id, idle_secs
+                )
+                raise asyncio.TimeoutError(f"Idle timeout after {idle_secs:.0f}s")
+
+            if line is not None:
+                last_output_time = now
+                log_batch.append(line)
+                line_count += 1
+
+                # Flush every 50 lines
+                if len(log_batch) >= 50:
+                    await _flush_batch()
+
+                # Extract session_id and cost from result line
+                if line.strip().startswith("{"):
+                    try:
+                        obj = json.loads(line)
+                        if obj.get("type") == "result":
+                            result_session_id = obj.get("session_id")
+                            result_cost_usd = obj.get("cost_usd")
+                    except json.JSONDecodeError:
+                        pass
+
+                if verbose:
+                    logger.debug("[%s] %s", activity_id[:8], line.rstrip())
+            else:
+                # Sentinel: exit code
+                exit_code = code or 1
+
+        await _flush_batch()
+        logger.info(
+            "SDK runner completed: exit=%d lines=%d session=%s cost=$%.4f",
+            exit_code,
+            line_count,
+            result_session_id or "none",
+            result_cost_usd or 0,
+        )
+        return exit_code, result_session_id, result_cost_usd
+
+    # Wrap with hard timeout
+    try:
+        return await asyncio.wait_for(
+            _stream_with_idle_timeout(),
+            timeout=HARD_TIMEOUT_SECS,
+        )
+    except asyncio.TimeoutError:
+        await _flush_batch()
+        logger.error("Activity %s hit hard timeout (%ds)", activity_id, HARD_TIMEOUT_SECS)
+        raise
 
 
 def _extract_summary(logs: list) -> str:
-    """Extract summary from last few log lines (max 500 chars)."""
+    """Extract summary from result log line (max 500 chars)."""
     if not logs:
         return "No output"
 
-    # Try to parse stream-json from last 10 lines
+    # Try to find result line in last 10 log entries
     for log in reversed(logs[-10:]):
         line = log["line"]
         try:
             obj = json.loads(line)
-            # Claude Code stream-json uses "result" field for final output
             if obj.get("type") == "result":
                 result_text = obj.get("result", "")
                 if result_text:
@@ -339,8 +359,8 @@ def _extract_summary(logs: list) -> str:
 
 
 def _slugify(text: str) -> str:
-    """Convert text to URL-safe slug."""
+    """Convert text to URL-safe slug, max 50 chars."""
     slug = text.lower()
     slug = "".join(c if c.isalnum() or c in ("-", "_") else "-" for c in slug)
-    slug = "-".join(filter(None, slug.split("-")))  # Remove consecutive dashes
-    return slug[:50]  # Limit length
+    slug = "-".join(filter(None, slug.split("-")))
+    return slug[:50]
