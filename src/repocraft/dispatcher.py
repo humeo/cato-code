@@ -204,7 +204,29 @@ async def _build_prompt(activity: dict, repo: dict, github_token: str) -> str:
         return patrol_prompt(repo_id=repo["id"], budget_remaining=budget)
 
     elif kind == "task":
-        # Free-form instruction; trigger is the full instruction text
+        # Trigger format: "pr:123:instruction" or "issue:123:instruction" or plain instruction
+        if trigger and trigger.startswith("pr:"):
+            parts = trigger.split(":", 2)
+            pr_num = parts[1]
+            instruction = parts[2] if len(parts) > 2 else "See PR for context."
+            return (
+                f"You were mentioned in a comment on PR #{pr_num} of "
+                f"https://github.com/{owner}/{repo_name}/pull/{pr_num}.\n\n"
+                f"The request was: {instruction}\n\n"
+                f"Read the PR (use `gh pr view {pr_num}`) to understand the context, "
+                f"then carry out the requested task."
+            )
+        elif trigger and trigger.startswith("issue:"):
+            parts = trigger.split(":", 2)
+            issue_num = parts[1]
+            instruction = parts[2] if len(parts) > 2 else "See issue for context."
+            return (
+                f"You were mentioned in a comment on issue #{issue_num} of "
+                f"https://github.com/{owner}/{repo_name}/issues/{issue_num}.\n\n"
+                f"The request was: {instruction}\n\n"
+                f"Read the issue (use `gh issue view {issue_num}`) to understand the context, "
+                f"then carry out the requested task."
+            )
         return trigger or "Execute the task as described."
 
     elif kind == "respond_review":

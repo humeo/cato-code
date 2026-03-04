@@ -132,20 +132,22 @@ def _parse_event(raw: dict[str, Any]) -> DetectedEvent | None:
         if action == "created" and _has_mention(body):
             issue_number = issue.get("number")
             pr_number = issue.get("pull_request", {}).get("url")  # Present if it's a PR
+            # Strip @repocraft mention to get the actual instruction
+            instruction = body.replace("@repocraft", "").strip()
             if pr_number:
                 # Comment on a PR
                 pr_num = int(pr_number.split("/")[-1])
                 return DetectedEvent(
                     event_id=event_id,
                     event_type="mention",
-                    trigger=f"pr:{pr_num}",
+                    trigger=f"pr:{pr_num}:{instruction}",
                     details={"pr_number": pr_num, "comment": body[:500]},
                 )
             elif issue_number is not None:
                 return DetectedEvent(
                     event_id=event_id,
                     event_type="mention",
-                    trigger=f"issue:{issue_number}",
+                    trigger=f"issue:{issue_number}:{instruction}",
                     details={"issue_number": issue_number, "comment": body[:500]},
                 )
 
