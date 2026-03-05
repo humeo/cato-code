@@ -50,6 +50,10 @@ RUN useradd -m -s /bin/bash repocraft && \
 COPY scripts/run_activity.py /app/run_activity.py
 RUN chown repocraft:repocraft /app/run_activity.py
 
+# Layer 10: Copy RepoCraft skills to container
+COPY skills/ /home/repocraft/.claude/skills/
+RUN chown -R repocraft:repocraft /home/repocraft/.claude
+
 USER repocraft
 WORKDIR /home/repocraft
 

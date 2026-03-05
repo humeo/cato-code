@@ -9,12 +9,11 @@ from .config import parse_repo_url, repo_id_from_url
 from .github.commenter import failure_comment, post_issue_comment
 from .github.issue_fetcher import fetch_issue
 from .templates.init_prompt import get_init_prompt
-from .templates.prompts import (
-    fix_issue_prompt,
-    patrol_prompt,
-    respond_review_prompt,
-    review_pr_prompt,
-    triage_prompt,
+from .skill_renderer import (
+    build_fix_issue_prompt,
+    build_patrol_prompt,
+    build_respond_review_prompt,
+    build_triage_prompt,
 )
 
 if TYPE_CHECKING:
@@ -225,7 +224,7 @@ async def _run_init(
 
 
 async def _build_prompt(activity: dict, repo: dict, github_token: str) -> str:
-    """Build prompt based on activity kind using typed prompt templates."""
+    """Build prompt based on activity kind using skill-based templates."""
     kind = activity["kind"]
     trigger = activity["trigger"] or ""
     owner, repo_name = parse_repo_url(repo["repo_url"])
@@ -237,27 +236,39 @@ async def _build_prompt(activity: dict, repo: dict, github_token: str) -> str:
         # Trigger format: "issue:123"
         if not trigger.startswith("issue:"):
             raise ValueError(f"Invalid trigger for fix_issue: {trigger!r}")
-        issue_number = int(trigger.split(":", 1)[1])
-        issue = await fetch_issue(owner, repo_name, issue_number, github_token)
-        return fix_issue_prompt(
-            issue_number=issue.number,
-            issue_title=issue.title,
-            issue_body=issue.body,
-            repo_owner=owner,
-            repo_name=repo_name,
+        issue_number = trigger.split(":", 1)[1]
+        issue = await fetch_issue(owner, repo_name, int(issue_number), github_token)
+
+        # Format issue data for the skill
+        issue_data = f"""Title: {issue.title}
+Author: {issue.author}
+Created: {issue.created_at}
+
+{issue.body}
+"""
+        return build_fix_issue_prompt(
+            issue_number=issue_number,
+            repo_id=repo.get("id", f"{owner}-{repo_name}"),
+            issue_data=issue_data,
         )
 
     elif kind == "triage":
         # Trigger format: "issue:123"
         if not trigger.startswith("issue:"):
             raise ValueError(f"Invalid trigger for triage: {trigger!r}")
-        issue_number = int(trigger.split(":", 1)[1])
-        issue = await fetch_issue(owner, repo_name, issue_number, github_token)
-        return triage_prompt(
-            issue_number=issue.number,
-            issue_title=issue.title,
-            issue_body=issue.body,
-            issue_author=issue.author,
+        issue_number = trigger.split(":", 1)[1]
+        issue = await fetch_issue(owner, repo_name, int(issue_number), github_token)
+
+        issue_data = f"""Title: {issue.title}
+Author: {issue.author}
+Created: {issue.created_at}
+
+{issue.body}
+"""
+        return build_triage_prompt(
+            issue_number=issue_number,
+            repo_id=repo.get("id", f"{owner}-{repo_name}"),
+            issue_data=issue_data,
         )
 
     elif kind == "patrol":
@@ -265,7 +276,10 @@ async def _build_prompt(activity: dict, repo: dict, github_token: str) -> str:
         budget = 5  # default
         if trigger.startswith("budget:"):
             budget = int(trigger.split(":", 1)[1])
-        return patrol_prompt(repo_id=repo["id"], budget_remaining=budget)
+        return build_patrol_prompt(
+            repo_id=repo.get("id", f"{owner}-{repo_name}"),
+            budget_remaining=budget,
+        )
 
     elif kind == "task":
         # Trigger format: "pr:123:instruction" or "issue:123:instruction" or plain instruction
@@ -301,15 +315,36 @@ async def _build_prompt(activity: dict, repo: dict, github_token: str) -> str:
         # Trigger format: "pr:123"
         if not trigger.startswith("pr:"):
             raise ValueError(f"Invalid trigger for respond_review: {trigger!r}")
-        pr_number = int(trigger.split(":", 1)[1])
-        return respond_review_prompt(pr_number=pr_number, review_comments="(Read from the PR itself using `gh pr view {pr_number} --comments`)")
+        pr_number = trigger.split(":", 1)[1]
+
+        # Fetch review comments (placeholder - actual implementation would use gh pr view)
+        review_comments = f"(Read from the PR itself using `gh pr view {pr_number} --comments`)"
+
+        return build_respond_review_prompt(
+            pr_number=pr_number,
+            repo_id=repo.get("id", f"{owner}-{repo_name}"),
+            review_comments=review_comments,
+        )
 
     elif kind == "review_pr":
         # Trigger format: "pr:123"
         if not trigger.startswith("pr:"):
             raise ValueError(f"Invalid trigger for review_pr: {trigger!r}")
-        pr_number = int(trigger.split(":", 1)[1])
-        return review_pr_prompt(pr_number=pr_number, pr_title="(Read from the PR)", pr_diff="(Use `gh pr diff {pr_number}` to get the diff)")
+        pr_number = trigger.split(":", 1)[1]
+
+        # For review_pr, we'll keep the simple prompt for now
+        # TODO: Create a review_pr skill
+        return (
+            f"Review PR #{pr_number} in repository {repo.get('id', f'{owner}-{repo_name}')}.\n\n"
+            f"Use `gh pr view {pr_number}` to read the PR description.\n"
+            f"Use `gh pr diff {pr_number}` to see the code changes.\n\n"
+            f"Provide a thorough code review focusing on:\n"
+            f"- Correctness and logic errors\n"
+            f"- Security vulnerabilities\n"
+            f"- Performance issues\n"
+            f"- Code quality and maintainability\n\n"
+            f"Post your review using `gh pr review {pr_number} --comment --body \"...\"`"
+        )
 
     else:
         raise ValueError(f"Unknown activity kind: {kind!r}")

@@ -1,0 +1,23 @@
+{
+  "skill_name": "fix_issue",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Fix GitHub issue #42 in this repo. The issue reports that the user login function crashes with a NullPointerException when the email field is null. The stack trace shows it's happening in src/auth/login.py at line 23.",
+      "expected_output": "Should reproduce the null pointer error, add a null check, verify the fix works, run full test suite, and create a PR with before/after evidence showing the crash and then the successful handling of null email.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "There's a bug reported in issue #156 where the CSV export feature is generating malformed output - the header row is missing and all the data is shifted. Can you take a look and fix it?",
+      "expected_output": "Should run the CSV export to capture the malformed output (before evidence), identify the root cause (likely missing header write), fix it, re-run to show correct CSV format (after evidence), and create a PR with the evidence comparison.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Issue #89 says the dashboard page is showing a blank screen when there's no data. The user expects to see a 'No data available' message instead. This is a UI bug that needs a screenshot for evidence.",
+      "expected_output": "Should start the dev server, take a screenshot of the blank dashboard (before), add the 'No data available' message to the UI component, take another screenshot showing the message (after), run tests, and create a PR with both screenshots in the evidence section.",
+      "files": []
+    }
+  ]
+}
