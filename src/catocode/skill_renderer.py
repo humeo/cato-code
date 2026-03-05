@@ -1,4 +1,4 @@
-"""Skill-based prompt rendering for RepoCraft activities.
+"""Skill-based prompt rendering for CatoCode activities.
 
 This module reads skill files (SKILL.md) and renders them into prompts
 for the SDK runner. This replaces the hardcoded prompt functions in
@@ -15,8 +15,8 @@ from typing import Any
 def _get_default_skills_dir() -> Path:
     """Get the default skills directory based on environment.
 
-    In tests or development: src/repocraft/container/skills/
-    In container: /root/.claude/skills/ or /home/repocraft/.claude/skills/
+    In tests or development: src/catocode/container/skills/
+    In container: /root/.claude/skills/ or /home/catocode/.claude/skills/
     """
     # Check if we're in a test environment
     if "PYTEST_CURRENT_TEST" in os.environ:
@@ -25,7 +25,7 @@ def _get_default_skills_dir() -> Path:
 
     # Check container paths
     container_paths = [
-        Path("/home/repocraft/.claude/skills"),
+        Path("/home/catocode/.claude/skills"),
         Path("/root/.claude/skills"),
     ]
     for path in container_paths:
@@ -321,6 +321,112 @@ Follow the respond_review workflow in this skill:
 4. Include evidence that concerns are addressed
 
 This is a session resume — the PR branch already exists. Do NOT reset the repo.
+
+Begin now.
+"""
+
+    return prompt
+
+
+def build_analyze_issue_prompt(
+    issue_number: str,
+    repo_id: str,
+    issue_data: str,
+    skill_name: str = "analyze_issue",
+) -> str:
+    """Build a prompt for analyzing a GitHub issue using the analyze_issue skill.
+
+    Args:
+        issue_number: GitHub issue number (e.g., "123")
+        repo_id: Repository identifier (e.g., "owner-repo")
+        issue_data: Full issue details
+        skill_name: Name of the skill to use
+
+    Returns:
+        Complete prompt for the SDK runner
+    """
+    skill_template = read_skill(skill_name)
+
+    context = {
+        "issue_number": issue_number,
+        "repo_id": repo_id,
+        "issue_data": issue_data,
+    }
+
+    skill_content = render_skill_prompt(skill_template, context)
+
+    prompt = f"""{skill_content}
+
+---
+
+## Current Task
+
+You are analyzing issue #{issue_number} in repository {repo_id}.
+
+### Repository Path
+
+`/repos/{repo_id}`
+
+### Instructions
+
+Follow the analysis workflow in this skill:
+1. Classify the issue type
+2. For bugs: analyze root cause and attempt reproduction
+3. Suggest 2-3 ranked solutions
+4. Post analysis comment with `/approve` instruction
+
+Begin now.
+"""
+
+    return prompt
+
+
+def build_review_pr_prompt(
+    pr_number: str,
+    repo_id: str,
+    pr_data: str,
+    skill_name: str = "review_pr",
+) -> str:
+    """Build a prompt for reviewing a pull request using the review_pr skill.
+
+    Args:
+        pr_number: GitHub PR number (e.g., "123")
+        repo_id: Repository identifier (e.g., "owner-repo")
+        pr_data: Full PR details
+        skill_name: Name of the skill to use
+
+    Returns:
+        Complete prompt for the SDK runner
+    """
+    skill_template = read_skill(skill_name)
+
+    context = {
+        "pr_number": pr_number,
+        "repo_id": repo_id,
+        "pr_data": pr_data,
+    }
+
+    skill_content = render_skill_prompt(skill_template, context)
+
+    prompt = f"""{skill_content}
+
+---
+
+## Current Task
+
+You are reviewing PR #{pr_number} in repository {repo_id}.
+
+### Repository Path
+
+`/repos/{repo_id}`
+
+### Instructions
+
+Follow the review workflow in this skill:
+1. Read PR description and changes using `gh pr view` and `gh pr diff`
+2. Analyze for quality, correctness, security, performance, testing, and documentation
+3. Post structured review with severity levels (🔴 🟡 🟢)
+4. Approve, request changes, or comment based on findings
 
 Begin now.
 """

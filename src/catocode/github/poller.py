@@ -6,7 +6,7 @@ Polls /repos/{owner}/{repo}/events using ETag for efficient caching.
 Detects:
 - IssuesEvent (action=opened) → triage activity
 - PullRequestReviewEvent → respond_review activity
-- IssueCommentEvent with @repocraft mention → task activity
+- IssueCommentEvent with @catocode mention → task activity
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
-MENTION_TRIGGER = "@repocraft"
+MENTION_TRIGGER = "@catocode"
 
 
 @dataclass
@@ -132,8 +132,8 @@ def _parse_event(raw: dict[str, Any]) -> DetectedEvent | None:
         if action == "created" and _has_mention(body):
             issue_number = issue.get("number")
             pr_number = issue.get("pull_request", {}).get("url")  # Present if it's a PR
-            # Strip @repocraft mention to get the actual instruction
-            instruction = body.replace("@repocraft", "").strip()
+            # Strip @catocode mention to get the actual instruction
+            instruction = body.replace("@catocode", "").strip()
             if pr_number:
                 # Comment on a PR
                 pr_num = int(pr_number.split("/")[-1])
@@ -155,5 +155,5 @@ def _parse_event(raw: dict[str, Any]) -> DetectedEvent | None:
 
 
 def _has_mention(text: str) -> bool:
-    """Check if text contains a @repocraft mention."""
+    """Check if text contains a @catocode mention."""
     return MENTION_TRIGGER.lower() in text.lower()

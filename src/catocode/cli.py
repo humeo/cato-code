@@ -28,8 +28,8 @@ console = Console()
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="repocraft",
-        description="RepoCraft — Self-Proving Autonomous Code Maintainer",
+        prog="catocode",
+        description="CatoCode — Self-Proving Autonomous Code Maintainer",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
 
@@ -144,7 +144,7 @@ async def cmd_daemon(args: argparse.Namespace) -> int:
 
     console.print(
         Panel(
-            "[bold green]RepoCraft Daemon[/bold green]\n"
+            "[bold green]CatoCode Daemon[/bold green]\n"
             f"Max concurrent: {args.max_concurrent}\n"
             "Press Ctrl+C to stop",
             border_style="green",
@@ -181,7 +181,7 @@ async def cmd_fix(args: argparse.Namespace) -> int:
 
     console.print(
         Panel(
-            f"[bold]RepoCraft[/bold] — fix issue\n"
+            f"[bold]CatoCode[/bold] — fix issue\n"
             f"Repo: [cyan]{owner}/{repo}[/cyan]\n"
             f"Issue: [yellow]#{issue_number}[/yellow]\n"
             f"Max turns: [magenta]{args.max_turns}[/magenta]",
@@ -274,7 +274,7 @@ async def cmd_status(args: argparse.Namespace) -> int:
         # Show all repos and recent activities
         repos = store.list_repos()
         if not repos:
-            console.print("[dim]No repos registered. Run `repocraft watch <url>` to start.[/dim]")
+            console.print("[dim]No repos registered. Run `catocode watch <url>` to start.[/dim]")
             return 0
 
         for repo in repos:

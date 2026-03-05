@@ -106,7 +106,7 @@ PR body MUST include:
 - Before/After evidence section (paste actual test output)
 - Summary table showing which tests passed before → after
 
-Branch name: `repocraft/fix/{issue_number}-<short-slug>`
+Branch name: `catocode/fix/{issue_number}-<short-slug>`
 
 Repository: {repo_owner}/{repo_name}
 """

@@ -3,7 +3,7 @@ from __future__ import annotations
 """Scheduler — the daemon's main loop.
 
 Three concurrent loops:
-1. _poll_loop: Every 60s, check watched repos for new GitHub events
+1. _approval_loop: Every 30s, check for approval comments on pending_approval activities
 2. _patrol_loop: Per-repo interval, trigger proactive code audits
 3. _dispatch_loop: Every 5s, pick up pending activities and dispatch
 
@@ -17,15 +17,15 @@ import logging
 import signal
 from datetime import datetime, timezone
 
-from .config import get_anthropic_api_key, get_anthropic_base_url, get_github_token, get_patrol_config
+from .config import get_anthropic_api_key, get_anthropic_base_url, get_github_token, get_patrol_config, parse_repo_url
 from .container.manager import ContainerManager
+from .decision import check_user_is_admin
 from .dispatcher import dispatch
-from .github.poller import poll_events
 from .store import Store
 
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL_SECS = 60
+APPROVAL_CHECK_INTERVAL_SECS = 30
 DISPATCH_CHECK_INTERVAL_SECS = 5
 MAX_CONCURRENT = 3  # Global max concurrent activities
 
@@ -71,7 +71,7 @@ class Scheduler:
 
         try:
             await asyncio.gather(
-                self._poll_loop(),
+                self._approval_loop(),
                 self._patrol_loop(),
                 self._dispatch_loop(),
             )
@@ -84,69 +84,118 @@ class Scheduler:
         """Signal the scheduler to stop gracefully."""
         self._stop_event.set()
 
-    async def _poll_loop(self) -> None:
-        """Poll GitHub events for all watched repos every POLL_INTERVAL_SECS."""
+    async def _approval_loop(self) -> None:
+        """Check for approval comments on pending_approval activities every 30s."""
         while not self._stop_event.is_set():
             try:
-                repos = self._store.list_watched_repos()
-                for repo in repos:
+                pending_approval = self._store.get_pending_approval_activities()
+                for activity in pending_approval:
                     try:
-                        await self._poll_repo(repo)
+                        await self._check_for_approval(activity)
                     except Exception as e:
-                        logger.error("Poll error for %s: %s", repo["id"], e)
+                        logger.error(
+                            "Approval check error for activity %s: %s",
+                            activity["id"][:8],
+                            e,
+                        )
             except Exception as e:
-                logger.error("Poll loop error: %s", e)
+                logger.error("Approval loop error: %s", e)
 
             try:
                 await asyncio.wait_for(
                     self._stop_event.wait(),
-                    timeout=POLL_INTERVAL_SECS,
+                    timeout=APPROVAL_CHECK_INTERVAL_SECS,
                 )
-                break  # Stop event set
+                break
             except asyncio.TimeoutError:
-                pass  # Normal — continue polling
+                pass
 
-    async def _poll_repo(self, repo: dict) -> None:
-        """Poll one repo for new events and create activities for detected events."""
-        repo_id = repo["id"]
-        repo_url = repo["repo_url"]
+    async def _check_for_approval(self, activity: dict) -> None:
+        """Check if admin posted approval comment for this activity.
 
-        # Parse owner/repo from URL
-        from .config import parse_repo_url
-        try:
-            owner, repo_name = parse_repo_url(repo_url)
-        except ValueError:
-            logger.error("Cannot parse repo URL: %s", repo_url)
+        Args:
+            activity: Activity record waiting for approval
+        """
+        import httpx
+
+        repo = self._store.get_repo(activity["repo_id"])
+        if repo is None:
+            logger.error("Repository not found: %s", activity["repo_id"])
             return
 
+        try:
+            owner, repo_name = parse_repo_url(repo["repo_url"])
+        except ValueError:
+            logger.error("Invalid repo URL: %s", repo["repo_url"])
+            return
+
+        # Extract issue/PR number from trigger
+        trigger = activity["trigger"]
+        if not trigger:
+            return
+
+        parts = trigger.split(":")
+        if len(parts) < 2:
+            return
+
+        issue_or_pr_type = parts[0]  # "issue" or "pr"
+        number = parts[1]
+
+        # Fetch recent comments
         github_token = get_github_token()
-        last_etag = repo["last_etag"]
+        if not github_token:
+            logger.error("GitHub token not configured")
+            return
 
-        result = await poll_events(owner, repo_name, last_etag, github_token)
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/issues/{number}/comments"
+        headers = {
+            "Authorization": f"Bearer {github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
 
-        # Update ETag and poll timestamp
-        self._store.update_repo(
-            repo_id,
-            last_etag=result.new_etag,
-            last_poll_at=datetime.now(timezone.utc).isoformat(),
-        )
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=headers, timeout=10.0)
+                if response.status_code != 200:
+                    logger.error("Failed to fetch comments: %s", response.status_code)
+                    return
 
-        for event in result.events:
-            # Skip already-processed events
-            if self._store.is_event_processed(repo_id, event.event_id):
-                continue
+                comments = response.json()
 
-            # Map event type to activity kind
-            kind = _event_type_to_kind(event.event_type)
-            if kind is None:
-                continue
+                # Check recent comments for approval keywords
+                approval_keywords = ["/approve", "/fix", "go ahead", "@catocode fix"]
 
-            activity_id = self._store.add_activity(repo_id, kind, event.trigger)
-            self._store.mark_event_processed(repo_id, event.event_id, event.event_type)
-            logger.info(
-                "Created %s activity %s for event %s (%s)",
-                kind, activity_id[:8], event.event_id, event.trigger,
-            )
+                for comment in reversed(comments[-10:]):  # Check last 10 comments
+                    comment_body = comment.get("body", "").lower()
+                    comment_author = comment.get("user", {}).get("login", "")
+                    comment_url = comment.get("html_url", "")
+
+                    # Check if comment contains approval keyword
+                    if any(keyword in comment_body for keyword in approval_keywords):
+                        # Verify user is admin
+                        is_admin = await check_user_is_admin(
+                            comment_author, owner, repo_name, github_token
+                        )
+
+                        if is_admin:
+                            # Approve the activity
+                            self._store.update_activity(
+                                activity["id"],
+                                status="pending",
+                                requires_approval=0,
+                                approved_by=comment_author,
+                                approval_comment_url=comment_url,
+                            )
+                            logger.info(
+                                "Activity %s approved by %s",
+                                activity["id"][:8],
+                                comment_author,
+                            )
+                            return
+
+        except Exception as e:
+            logger.error("Failed to check for approval: %s", e)
 
     async def _patrol_loop(self) -> None:
         """Schedule patrol activities for repos that haven't been audited recently."""
@@ -240,12 +289,3 @@ class Scheduler:
                     )
                 except Exception as e:
                     logger.error("Dispatch failed for activity %s: %s", activity_id[:8], e)
-
-
-def _event_type_to_kind(event_type: str) -> str | None:
-    """Map poller event type to activity kind."""
-    return {
-        "new_issue": "triage",
-        "pr_review": "respond_review",
-        "mention": "task",
-    }.get(event_type)

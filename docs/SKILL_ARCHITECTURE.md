@@ -2,7 +2,7 @@
 
 ## 概述
 
-RepoCraft v3 现在使用 **Skill+SDK 混合架构**，结合了两者的优势：
+CatoCode v3 现在使用 **Skill+SDK 混合架构**，结合了两者的优势：
 - **Skills**：可维护的 Markdown 格式 prompt 模板
 - **SDK**：可靠的执行引擎，支持会话恢复、重试、流式日志
 
@@ -52,7 +52,7 @@ await exec_sdk_runner(prompt, ...)
 ## 文件结构
 
 ```
-src/repocraft/
+src/catocode/
 ├── skill_renderer.py              ← 新增：Skill 渲染引擎
 ├── dispatcher.py                  ← 修改：使用 skill_renderer
 └── container/
@@ -74,10 +74,10 @@ src/repocraft/
 ## 容器内布局
 
 ```
-Container: repocraft-worker
-  /home/repocraft/.claude/
+Container: catocode-worker
+  /home/catocode/.claude/
     ├── CLAUDE.md                  ← 用户级规则（Proof of Work 协议）
-    └── skills/                    ← RepoCraft skills
+    └── skills/                    ← CatoCode skills
         ├── fix_issue/SKILL.md
         ├── patrol/SKILL.md
         ├── triage/SKILL.md
@@ -93,7 +93,7 @@ Container: repocraft-worker
 ### 1. 用户触发
 
 ```bash
-repocraft fix https://github.com/owner/repo/issues/123
+catocode fix https://github.com/owner/repo/issues/123
 ```
 
 ### 2. Dispatcher 构建 Prompt
@@ -120,7 +120,7 @@ async def _build_prompt(activity, repo, github_token):
 def build_fix_issue_prompt(issue_number, repo_id, issue_data):
     # 1. 读取 skill 文件
     skill_template = read_skill("fix_issue")
-    # /home/repocraft/.claude/skills/fix_issue/SKILL.md
+    # /home/catocode/.claude/skills/fix_issue/SKILL.md
 
     # 2. 变量替换
     skill_content = render_skill_prompt(skill_template, {
@@ -185,7 +185,7 @@ description: Fix a GitHub issue with rigorous Proof of Work evidence collection.
 ```markdown
 # Fix Issue with Proof of Work
 
-You are fixing a GitHub issue using RepoCraft's Self-Proving methodology.
+You are fixing a GitHub issue using CatoCode's Self-Proving methodology.
 
 ## Context Setup
 
@@ -224,7 +224,7 @@ Skill 中可以使用 `{variable}` 占位符：
 - Layer 1: 复现 bug，捕获失败输出
 - Layer 2: 验证修复，捕获成功输出
 - 创建 PR，包含证据表格
-- 分支命名：`repocraft/fix/{issue_number}-{slug}`
+- 分支命名：`catocode/fix/{issue_number}-{slug}`
 
 ### 2. patrol
 
@@ -270,7 +270,7 @@ Skill 中可以使用 `{variable}` 占位符：
 
 ```bash
 # 在容器内
-cat > /home/repocraft/.claude/skills/fix_issue/SKILL.md << 'EOF'
+cat > /home/catocode/.claude/skills/fix_issue/SKILL.md << 'EOF'
 ---
 name: fix_issue
 description: My custom fix_issue skill
@@ -288,7 +288,7 @@ EOF
 docker.containers.run(
     volumes={
         "/path/to/custom/skills": {
-            "bind": "/home/repocraft/.claude/skills",
+            "bind": "/home/catocode/.claude/skills",
             "mode": "ro"
         }
     }
@@ -371,8 +371,8 @@ await exec_claude_cli(f"claude -p /repos/{repo_id} /fix_issue issue:{issue_num}"
 
 ## 相关文件
 
-- `src/repocraft/skill_renderer.py` - Skill 渲染引擎
-- `src/repocraft/dispatcher.py` - 使用 skill_renderer
-- `src/repocraft/container/Dockerfile` - 复制 skills 到容器
-- `src/repocraft/container/skills/*/SKILL.md` - Skill 定义
-- `src/repocraft/templates/user_claude_md.py` - 用户级 CLAUDE.md（Proof of Work 协议）
+- `src/catocode/skill_renderer.py` - Skill 渲染引擎
+- `src/catocode/dispatcher.py` - 使用 skill_renderer
+- `src/catocode/container/Dockerfile` - 复制 skills 到容器
+- `src/catocode/container/skills/*/SKILL.md` - Skill 定义
+- `src/catocode/templates/user_claude_md.py` - 用户级 CLAUDE.md（Proof of Work 协议）

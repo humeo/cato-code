@@ -18,10 +18,10 @@ from ..config import get_git_user_name, get_git_user_email
 
 logger = logging.getLogger(__name__)
 
-CONTAINER_NAME = "repocraft-worker"
-IMAGE_NAME = "repocraft-worker:v1"
-MEMORY_LIMIT = os.environ.get("REPOCRAFT_MEM", "8g")
-CPU_QUOTA = int(os.environ.get("REPOCRAFT_CPUS", "4")) * 100_000
+CONTAINER_NAME = "catocode-worker"
+IMAGE_NAME = "catocode-worker:v1"
+MEMORY_LIMIT = os.environ.get("CATOCODE_MEM", "8g")
+CPU_QUOTA = int(os.environ.get("CATOCODE_CPUS", "4")) * 100_000
 
 
 def _container_env(anthropic_api_key: str, github_token: str, anthropic_base_url: str | None = None) -> dict[str, str]:
@@ -145,23 +145,23 @@ class ContainerManager:
             cpu_quota=CPU_QUOTA,
             network_mode="bridge",
             volumes={
-                "repocraft-repos": {"bind": "/repos", "mode": "rw"},
-                "repocraft-output": {"bind": "/output", "mode": "rw"},
+                "catocode-repos": {"bind": "/repos", "mode": "rw"},
+                "catocode-output": {"bind": "/output", "mode": "rw"},
             },
             environment=env,
         )
         logger.info("Container %s started", CONTAINER_NAME)
         # Fix volume ownership (named volumes may be initialized as root)
         self._client.containers.get(CONTAINER_NAME).exec_run(
-            cmd=["chown", "-R", "repocraft:repocraft", "/repos", "/output"],
+            cmd=["chown", "-R", "catocode:catocode", "/repos", "/output"],
             user="root",
         )
 
     def _write_user_claude_md(self) -> None:
         from ..templates.user_claude_md import get_user_claude_md
         content = get_user_claude_md()
-        self.exec("mkdir -p /home/repocraft/.claude")
-        self._put_file("/home/repocraft/.claude/CLAUDE.md", content)
+        self.exec("mkdir -p /home/catocode/.claude")
+        self._put_file("/home/catocode/.claude/CLAUDE.md", content)
         logger.debug("User CLAUDE.md written to container")
 
     def _configure_git_identity(self) -> None:
@@ -171,7 +171,7 @@ class ContainerManager:
         self.exec(f'git config --global user.name "{name}"')
         self.exec(f'git config --global user.email "{email}"')
         self.exec("git config --global --add safe.directory '*'")
-        self.exec("git config --global credential.helper repocraft")
+        self.exec("git config --global credential.helper catocode")
         logger.debug("Git identity: %s <%s>", name, email)
 
     def _put_file(self, path: str, content: str) -> None:
@@ -185,10 +185,10 @@ class ContainerManager:
         with tarfile.open(fileobj=buf, mode="w") as tf:
             info = tarfile.TarInfo(name=filename)
             info.size = len(content_bytes)
-            info.uid = 1001  # repocraft user
+            info.uid = 1001  # catocode user
             info.gid = 1001
-            info.uname = "repocraft"
-            info.gname = "repocraft"
+            info.uname = "catocode"
+            info.gname = "catocode"
             tf.addfile(info, io.BytesIO(content_bytes))
         buf.seek(0)
         container.put_archive(directory, buf)

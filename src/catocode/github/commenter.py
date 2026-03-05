@@ -40,7 +40,7 @@ async def post_issue_comment(
 def failure_comment(activity_kind: str, error_summary: str) -> str:
     """Build a user-facing failure comment."""
     return (
-        f"Sorry, RepoCraft ran into a problem while processing this ({activity_kind}):\n\n"
+        f"Sorry, CatoCode ran into a problem while processing this ({activity_kind}):\n\n"
         f"```\n{error_summary[:300]}\n```\n\n"
-        f"This may be a transient error. You can mention `@repocraft` again to retry."
+        f"This may be a transient error. You can mention `@catocode` again to retry."
     )

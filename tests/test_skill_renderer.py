@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from repocraft.skill_renderer import (
+from catocode.skill_renderer import (
     build_fix_issue_prompt,
     build_patrol_prompt,
     build_respond_review_prompt,

@@ -36,31 +36,31 @@ RUN pip3 install --break-system-packages playwright \
 # Layer 7: git credential helper + global git config
 # Note: user.name and user.email are set at runtime via _configure_git_identity()
 RUN printf '#!/bin/bash\necho "protocol=https"\necho "host=github.com"\necho "username=x-access-token"\necho "password=${GITHUB_TOKEN}"\n' \
-      > /usr/local/bin/git-credential-repocraft \
-    && chmod +x /usr/local/bin/git-credential-repocraft \
-    && git config --global credential.helper repocraft \
+      > /usr/local/bin/git-credential-catocode \
+    && chmod +x /usr/local/bin/git-credential-catocode \
+    && git config --global credential.helper catocode \
     && git config --global --add safe.directory '*'
 
 # Layer 8: Create non-root user for Claude Code
-RUN useradd -m -s /bin/bash repocraft && \
+RUN useradd -m -s /bin/bash catocode && \
     mkdir -p /repos /output /app && \
-    chown -R repocraft:repocraft /repos /output /app
+    chown -R catocode:catocode /repos /output /app
 
 # Layer 9: Copy SDK runner script
 COPY scripts/run_activity.py /app/run_activity.py
-RUN chown repocraft:repocraft /app/run_activity.py
+RUN chown catocode:catocode /app/run_activity.py
 
 # Layer 10: Copy RepoCraft skills to container
-COPY skills/ /home/repocraft/.claude/skills/
-RUN chown -R repocraft:repocraft /home/repocraft/.claude
+COPY skills/ /home/catocode/.claude/skills/
+RUN chown -R catocode:catocode /home/catocode/.claude
 
-USER repocraft
-WORKDIR /home/repocraft
+USER catocode
+WORKDIR /home/catocode
 
 # Ensure uv is available for non-root user
-ENV PATH="/root/.local/bin:/home/repocraft/.local/bin:$PATH"
+ENV PATH="/root/.local/bin:/home/catocode/.local/bin:$PATH"
 
-# Install Playwright Chromium as repocraft user (browsers stored in ~/.cache/ms-playwright)
+# Install Playwright Chromium as catocode user (browsers stored in ~/.cache/ms-playwright)
 RUN playwright install chromium
 
 # Clear proxy for runtime

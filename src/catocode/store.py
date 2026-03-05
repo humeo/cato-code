@@ -53,6 +53,22 @@ CREATE TABLE IF NOT EXISTS patrol_budget (
     max_issues INTEGER DEFAULT 5,
     window_hours INTEGER DEFAULT 12
 );
+CREATE TABLE IF NOT EXISTS webhook_config (
+    repo_id TEXT PRIMARY KEY,
+    webhook_secret TEXT NOT NULL,
+    webhook_id TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (repo_id) REFERENCES repos(id)
+);
+
+CREATE TABLE IF NOT EXISTS webhook_events (
+    event_id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload TEXT,
+    received_at TEXT NOT NULL,
+    processed INTEGER DEFAULT 0
+);
 """
 
 # Migrations: columns added after initial schema
@@ -61,6 +77,10 @@ _MIGRATIONS = [
     "ALTER TABLE repos ADD COLUMN last_etag TEXT",
     "ALTER TABLE repos ADD COLUMN last_poll_at TEXT",
     "ALTER TABLE repos ADD COLUMN patrol_interval_hours INTEGER DEFAULT 12",
+    "ALTER TABLE activities ADD COLUMN requires_approval INTEGER DEFAULT 0",
+    "ALTER TABLE activities ADD COLUMN approval_comment_url TEXT",
+    "ALTER TABLE activities ADD COLUMN approved_by TEXT",
+    "ALTER TABLE activities ADD COLUMN approved_at TEXT",
 ]
 
 
@@ -71,7 +91,7 @@ def _now() -> str:
 class Store:
     def __init__(self, db_path: Path | None = None) -> None:
         if db_path is None:
-            db_path = Path.home() / ".repocraft" / "repocraft.db"
+            db_path = Path.home() / ".catocode" / "catocode.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._path = db_path
         self._lock = threading.Lock()
@@ -297,5 +317,68 @@ class Store:
             self._conn.execute(
                 "UPDATE patrol_budget SET issues_filed = issues_filed + 1 WHERE repo_id = ?",
                 (repo_id,),
+            )
+            self._conn.commit()
+
+    # --- approval workflow ---
+
+    def get_pending_approval_activities(self) -> list[sqlite3.Row]:
+        """Get activities waiting for human approval."""
+        with self._lock:
+            cur = self._conn.execute(
+                """SELECT * FROM activities
+                   WHERE status = 'pending' AND requires_approval = 1
+                   ORDER BY created_at"""
+            )
+            return cur.fetchall()
+
+    # --- webhook management ---
+
+    def add_webhook_config(self, repo_id: str, secret: str, webhook_id: str | None = None) -> None:
+        """Store webhook configuration for a repo."""
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO webhook_config
+                   (repo_id, webhook_secret, webhook_id, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (repo_id, secret, webhook_id, _now()),
+            )
+            self._conn.commit()
+
+    def get_webhook_config(self, repo_id: str) -> sqlite3.Row | None:
+        """Get webhook configuration for a repo."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM webhook_config WHERE repo_id = ?", (repo_id,)
+            )
+            return cur.fetchone()
+
+    def add_webhook_event(self, event_id: str, repo_id: str, event_type: str, payload: str | None = None) -> None:
+        """Record a received webhook event."""
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR IGNORE INTO webhook_events
+                   (event_id, repo_id, event_type, payload, received_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (event_id, repo_id, event_type, payload, _now()),
+            )
+            self._conn.commit()
+
+    def is_webhook_event_processed(self, event_id: str) -> bool:
+        """Check if a webhook event has been processed."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT processed FROM webhook_events WHERE event_id = ?",
+                (event_id,),
+            )
+            row = cur.fetchone()
+            return row is not None and row["processed"] == 1
+
+    def mark_webhook_event_processed(self, event_id: str) -> None:
+        """Mark a webhook event as processed."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE webhook_events SET processed = 1 WHERE event_id = ?",
+                (event_id,),
             )
             self._conn.commit()

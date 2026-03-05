@@ -29,12 +29,12 @@ def get_github_token() -> str:
 
 def get_git_user_name() -> str:
     """Get git user name from GIT_USER_NAME env var."""
-    return os.environ.get("GIT_USER_NAME", "RepoCraft")
+    return os.environ.get("GIT_USER_NAME", "CatoCode")
 
 
 def get_git_user_email() -> str:
     """Get git user email from GIT_USER_EMAIL env var."""
-    return os.environ.get("GIT_USER_EMAIL", "repocraft@bot.local")
+    return os.environ.get("GIT_USER_EMAIL", "catocode@bot.local")
 
 
 class PatrolConfig(NamedTuple):
@@ -45,8 +45,8 @@ class PatrolConfig(NamedTuple):
 def get_patrol_config() -> PatrolConfig:
     """Get patrol rate-limiting config from env vars."""
     return PatrolConfig(
-        max_issues=int(os.environ.get("REPOCRAFT_PATROL_MAX_ISSUES", "5")),
-        window_hours=int(os.environ.get("REPOCRAFT_PATROL_WINDOW_HOURS", "12")),
+        max_issues=int(os.environ.get("CATOCODE_PATROL_MAX_ISSUES", "5")),
+        window_hours=int(os.environ.get("CATOCODE_PATROL_WINDOW_HOURS", "12")),
     )
 
 
@@ -86,12 +86,12 @@ def parse_repo_url(repo_url: str) -> tuple[str, str]:
 
 # Backward compatibility for existing tests
 @dataclass
-class RepoCraftConfig:
+class CatoCodeConfig:
     repo_url: str
     issue_number: int
     owner: str = field(init=False)
     repo: str = field(init=False)
-    container_image: str = "repocraft-worker:v1"
+    container_image: str = "catocode-worker:v1"
     model: str = "claude-sonnet-4-6"
     max_turns_per_phase: int = 30
     max_budget_usd: float = 10.0

@@ -26,7 +26,7 @@ prompt = render_skill_prompt(skill_template, context)
 ### 2. 创建的文件
 
 #### 新增核心模块
-- `src/repocraft/skill_renderer.py` - Skill 渲染引擎（280 行）
+- `src/catocode/skill_renderer.py` - Skill 渲染引擎（280 行）
   - `read_skill()` - 读取 SKILL.md，自动检测路径
   - `render_skill_prompt()` - 变量替换
   - `build_fix_issue_prompt()` - 构建 fix_issue prompt
@@ -35,22 +35,22 @@ prompt = render_skill_prompt(skill_template, context)
   - `build_respond_review_prompt()` - 构建 respond_review prompt
 
 #### 新增 Skills（4 个）
-- `src/repocraft/container/skills/fix_issue/SKILL.md` (200 行)
+- `src/catocode/container/skills/fix_issue/SKILL.md` (200 行)
   - Layer 1: 复现证据（MANDATORY）
   - Layer 2: 验证证据（MANDATORY）
   - 创建 PR 包含 Before/After 证据表
 
-- `src/repocraft/container/skills/patrol/SKILL.md` (180 行)
+- `src/catocode/container/skills/patrol/SKILL.md` (180 行)
   - 优先级：安全 > 崩溃 > 逻辑错误 > 代码质量
   - 强制复现证据（不允许推测性 issue）
   - 预算限制机制
 
-- `src/repocraft/container/skills/triage/SKILL.md` (160 行)
+- `src/catocode/container/skills/triage/SKILL.md` (160 行)
   - 分类：bug / feature / question / duplicate
   - 快速复现尝试（5-10 分钟）
   - 实质性回复 + 标签
 
-- `src/repocraft/container/skills/respond_review/SKILL.md` (150 行)
+- `src/catocode/container/skills/respond_review/SKILL.md` (150 行)
   - 会话恢复（PR 分支已存在）
   - 逐条处理 review 评论
   - 不使用 force-push
@@ -63,8 +63,8 @@ prompt = render_skill_prompt(skill_template, context)
 
 #### 文档
 - `docs/SKILL_ARCHITECTURE.md` - 完整架构文档
-- `src/repocraft/container/skills/fix_issue/README.md` - 使用说明
-- `src/repocraft/container/skills/fix_issue/evals/evals.json` - 测试用例
+- `src/catocode/container/skills/fix_issue/README.md` - 使用说明
+- `src/catocode/container/skills/fix_issue/evals/evals.json` - 测试用例
 
 ### 3. 修改的文件
 
@@ -75,7 +75,7 @@ prompt = render_skill_prompt(skill_template, context)
 
 #### Dockerfile
 - 添加 Layer 10：复制 skills 到容器
-- 路径：`/home/repocraft/.claude/skills/`
+- 路径：`/home/catocode/.claude/skills/`
 
 ### 4. 测试结果
 
@@ -103,7 +103,7 @@ uv run pytest -v
 ## 容器内布局
 
 ```
-/home/repocraft/.claude/
+/home/catocode/.claude/
   ├── CLAUDE.md                    ← 用户级规则（Proof of Work）
   └── skills/
       ├── fix_issue/SKILL.md       ← 修复 issue
@@ -120,7 +120,7 @@ uv run pytest -v
 
 ### 用户触发
 ```bash
-repocraft fix https://github.com/owner/repo/issues/123
+catocode fix https://github.com/owner/repo/issues/123
 ```
 
 ### 1. Dispatcher 解析
@@ -133,7 +133,7 @@ prompt = await _build_prompt(activity, repo, github_token)
 ```python
 # 读取 skill 模板
 skill_template = read_skill("fix_issue")
-# /home/repocraft/.claude/skills/fix_issue/SKILL.md
+# /home/catocode/.claude/skills/fix_issue/SKILL.md
 
 # 变量替换
 skill_content = render_skill_prompt(skill_template, {
@@ -169,7 +169,7 @@ await exec_sdk_runner(
 
 ```bash
 # 在容器内
-cat > /home/repocraft/.claude/skills/fix_issue/SKILL.md << 'EOF'
+cat > /home/catocode/.claude/skills/fix_issue/SKILL.md << 'EOF'
 ---
 name: fix_issue
 description: My custom fix process
@@ -185,7 +185,7 @@ EOF
 docker.containers.run(
     volumes={
         "/path/to/custom/skills": {
-            "bind": "/home/repocraft/.claude/skills",
+            "bind": "/home/catocode/.claude/skills",
             "mode": "ro"
         }
     }
@@ -281,8 +281,8 @@ await exec_claude_cli(f"claude -p /repos/{repo_id} /fix_issue issue:{issue_num}"
 
 1. **测试 Docker 构建**
    ```bash
-   cd src/repocraft/container
-   docker build -t repocraft-worker:v1 .
+   cd src/catocode/container
+   docker build -t catocode-worker:v1 .
    ```
 
 2. **端到端测试**（需要 Docker + API key）
@@ -301,7 +301,7 @@ await exec_claude_cli(f"claude -p /repos/{repo_id} /fix_issue issue:{issue_num}"
 
 ## 总结
 
-成功将 RepoCraft 从硬编码 prompt 架构迁移到 Skill+SDK 混合架构：
+成功将 CatoCode 从硬编码 prompt 架构迁移到 Skill+SDK 混合架构：
 
 ✅ **可维护性提升** - Prompt 在 Markdown 文件中，易于编辑
 ✅ **用户可定制** - 可以覆盖任何 skill
@@ -309,4 +309,4 @@ await exec_claude_cli(f"claude -p /repos/{repo_id} /fix_issue issue:{issue_num}"
 ✅ **无破坏性变更** - 所有现有测试通过
 ✅ **文档完整** - 架构文档、使用说明、测试用例
 
-这是一个重要的架构改进，为 RepoCraft 的长期可维护性和可扩展性奠定了基础。
+这是一个重要的架构改进，为 CatoCode 的长期可维护性和可扩展性奠定了基础。

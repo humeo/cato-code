@@ -79,5 +79,5 @@ Only include this section if the project has a web UI.
 3. If there's a web UI, try starting the dev server briefly to confirm the port
 4. Write CLAUDE.md to the project root with your findings
 5. Use clear, concise, actionable language — future activities will rely on this
-6. Commit and push CLAUDE.md: `git add CLAUDE.md && git commit -m "chore: add CLAUDE.md (RepoCraft init)" && git push origin HEAD`
+6. Commit and push CLAUDE.md: `git add CLAUDE.md && git commit -m "chore: add CLAUDE.md (CatoCode init)" && git push origin HEAD`
 """

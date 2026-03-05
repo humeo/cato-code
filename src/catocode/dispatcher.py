@@ -10,9 +10,11 @@ from .github.commenter import failure_comment, post_issue_comment
 from .github.issue_fetcher import fetch_issue
 from .templates.init_prompt import get_init_prompt
 from .skill_renderer import (
+    build_analyze_issue_prompt,
     build_fix_issue_prompt,
     build_patrol_prompt,
     build_respond_review_prompt,
+    build_review_pr_prompt,
     build_triage_prompt,
 )
 
@@ -271,6 +273,26 @@ Created: {issue.created_at}
             issue_data=issue_data,
         )
 
+    elif kind == "analyze_issue":
+        # Trigger format: "issue:123"
+        if not trigger.startswith("issue:"):
+            raise ValueError(f"Invalid trigger for analyze_issue: {trigger!r}")
+        issue_number = trigger.split(":", 1)[1]
+        issue = await fetch_issue(owner, repo_name, int(issue_number), github_token)
+
+        issue_data = f"""Title: {issue.title}
+Author: {issue.author}
+Created: {issue.created_at}
+Labels: {', '.join(issue.labels) if issue.labels else 'None'}
+
+{issue.body}
+"""
+        return build_analyze_issue_prompt(
+            issue_number=issue_number,
+            repo_id=repo.get("id", f"{owner}-{repo_name}"),
+            issue_data=issue_data,
+        )
+
     elif kind == "patrol":
         # Trigger format: "budget:N" or None
         budget = 5  # default
@@ -332,18 +354,13 @@ Created: {issue.created_at}
             raise ValueError(f"Invalid trigger for review_pr: {trigger!r}")
         pr_number = trigger.split(":", 1)[1]
 
-        # For review_pr, we'll keep the simple prompt for now
-        # TODO: Create a review_pr skill
-        return (
-            f"Review PR #{pr_number} in repository {repo.get('id', f'{owner}-{repo_name}')}.\n\n"
-            f"Use `gh pr view {pr_number}` to read the PR description.\n"
-            f"Use `gh pr diff {pr_number}` to see the code changes.\n\n"
-            f"Provide a thorough code review focusing on:\n"
-            f"- Correctness and logic errors\n"
-            f"- Security vulnerabilities\n"
-            f"- Performance issues\n"
-            f"- Code quality and maintainability\n\n"
-            f"Post your review using `gh pr review {pr_number} --comment --body \"...\"`"
+        # Fetch PR details using gh CLI
+        pr_data = f"(Use `gh pr view {pr_number}` and `gh pr diff {pr_number}` to read the PR)"
+
+        return build_review_pr_prompt(
+            pr_number=pr_number,
+            repo_id=repo.get("id", f"{owner}-{repo_name}"),
+            pr_data=pr_data,
         )
 
     else:

@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import pytest
 
-from repocraft.config import RepoCraftConfig, parse_issue_url, repo_id_from_url
+from catocode.config import CatoCodeConfig, parse_issue_url, repo_id_from_url
 
 
 def test_config_parses_owner_repo():
-    cfg = RepoCraftConfig(repo_url="https://github.com/psf/requests", issue_number=1)
+    cfg = CatoCodeConfig(repo_url="https://github.com/psf/requests", issue_number=1)
     assert cfg.owner == "psf"
     assert cfg.repo == "requests"
 
 
 def test_config_invalid_url():
     with pytest.raises(ValueError, match="Invalid GitHub repo URL"):
-        RepoCraftConfig(repo_url="https://notgithub.com/foo", issue_number=1)
+        CatoCodeConfig(repo_url="https://notgithub.com/foo", issue_number=1)
 
 
 def test_parse_issue_url():

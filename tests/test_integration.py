@@ -15,9 +15,9 @@ import pytest
 
 @pytest.fixture(scope="session")
 def container_mgr():
-    """Start repocraft-worker container, stop after test session."""
-    from repocraft.container.manager import ContainerManager
-    from repocraft.config import get_anthropic_api_key, get_anthropic_base_url, get_github_token
+    """Start catocode-worker container, stop after test session."""
+    from catocode.container.manager import ContainerManager
+    from catocode.config import get_anthropic_api_key, get_anthropic_base_url, get_github_token
 
     api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
     github_token = get_github_token() or ""
@@ -31,7 +31,7 @@ def container_mgr():
 @pytest.fixture
 def store(tmp_path: Path):
     """Temporary SQLite DB for each test."""
-    from repocraft.store import Store
+    from catocode.store import Store
     return Store(tmp_path / "test.db")
 
 
@@ -74,7 +74,7 @@ def test_container_playwright_works(container_mgr):
 
 @pytest.mark.integration
 def test_container_git_identity(container_mgr):
-    """Git identity is configured with user values (not RepoCraft default)."""
+    """Git identity is configured with user values (not CatoCode default)."""
     result = container_mgr.exec("git config --global user.name")
     assert result.exit_code == 0
     # Should be set to GIT_USER_NAME or default — just confirm it's configured
@@ -147,18 +147,18 @@ def test_fix_issue_end_to_end(container_mgr, store):
     """Full fix flow: clone → init → fix → PR with evidence.
 
     Requires a test repo with a known fixable bug.
-    Set REPOCRAFT_TEST_ISSUE_URL in env to specify the issue.
+    Set CATOCODE_TEST_ISSUE_URL in env to specify the issue.
     """
     import asyncio
-    from repocraft.config import (
+    from catocode.config import (
         get_anthropic_api_key, get_anthropic_base_url,
         get_github_token, parse_issue_url, repo_id_from_url,
     )
-    from repocraft.dispatcher import dispatch
+    from catocode.dispatcher import dispatch
 
-    issue_url = os.environ.get("REPOCRAFT_TEST_ISSUE_URL")
+    issue_url = os.environ.get("CATOCODE_TEST_ISSUE_URL")
     if not issue_url:
-        pytest.skip("Set REPOCRAFT_TEST_ISSUE_URL to run end-to-end test")
+        pytest.skip("Set CATOCODE_TEST_ISSUE_URL to run end-to-end test")
 
     owner, repo, issue_num = parse_issue_url(issue_url)
     repo_url = f"https://github.com/{owner}/{repo}"

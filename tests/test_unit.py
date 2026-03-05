@@ -1,4 +1,4 @@
-"""Unit tests for RepoCraft v3.
+"""Unit tests for CatoCode v3.
 
 No Docker, no network, no API key required.
 """
@@ -11,7 +11,7 @@ import pytest
 
 # --- Config ---
 
-from repocraft.config import (
+from catocode.config import (
     PatrolConfig,
     get_git_user_email,
     get_git_user_name,
@@ -48,7 +48,7 @@ def test_get_git_user_name_from_env(monkeypatch: pytest.MonkeyPatch):
 
 def test_get_git_user_name_default(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("GIT_USER_NAME", raising=False)
-    assert get_git_user_name() == "RepoCraft"
+    assert get_git_user_name() == "CatoCode"
 
 
 def test_get_git_user_email_from_env(monkeypatch: pytest.MonkeyPatch):
@@ -57,15 +57,15 @@ def test_get_git_user_email_from_env(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_get_patrol_config_defaults(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("REPOCRAFT_PATROL_MAX_ISSUES", raising=False)
-    monkeypatch.delenv("REPOCRAFT_PATROL_WINDOW_HOURS", raising=False)
+    monkeypatch.delenv("CATOCODE_PATROL_MAX_ISSUES", raising=False)
+    monkeypatch.delenv("CATOCODE_PATROL_WINDOW_HOURS", raising=False)
     cfg = get_patrol_config()
     assert cfg == PatrolConfig(max_issues=5, window_hours=12)
 
 
 def test_get_patrol_config_from_env(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("REPOCRAFT_PATROL_MAX_ISSUES", "10")
-    monkeypatch.setenv("REPOCRAFT_PATROL_WINDOW_HOURS", "24")
+    monkeypatch.setenv("CATOCODE_PATROL_MAX_ISSUES", "10")
+    monkeypatch.setenv("CATOCODE_PATROL_WINDOW_HOURS", "24")
     cfg = get_patrol_config()
     assert cfg.max_issues == 10
     assert cfg.window_hours == 24
@@ -73,7 +73,7 @@ def test_get_patrol_config_from_env(monkeypatch: pytest.MonkeyPatch):
 
 # --- Store ---
 
-from repocraft.store import Store
+from catocode.store import Store
 
 
 def test_store_add_repo(tmp_path: Path):
@@ -238,12 +238,12 @@ def test_store_mark_crashed_activities(tmp_path: Path):
 
 # --- Poller ---
 
-from repocraft.github.poller import _has_mention, _parse_event
+from catocode.github.poller import _has_mention, _parse_event
 
 
 def test_poller_detect_mention():
-    assert _has_mention("Hey @repocraft can you fix this?")
-    assert _has_mention("@Repocraft please help")  # case insensitive
+    assert _has_mention("Hey @catocode can you fix this?")
+    assert _has_mention("@CatoCode please help")  # case insensitive
 
 
 def test_poller_detect_mention_negative():
@@ -319,7 +319,7 @@ def test_poller_mention_on_pr_includes_instruction():
         "type": "IssueCommentEvent",
         "payload": {
             "action": "created",
-            "comment": {"body": "@repocraft fix the conflicts"},
+            "comment": {"body": "@catocode fix the conflicts"},
             "issue": {
                 "number": 2,
                 "pull_request": {"url": "https://github.com/owner/repo/pulls/2"},
@@ -341,7 +341,7 @@ def test_poller_mention_on_issue_includes_instruction():
         "type": "IssueCommentEvent",
         "payload": {
             "action": "created",
-            "comment": {"body": "@repocraft add unit tests"},
+            "comment": {"body": "@catocode add unit tests"},
             "issue": {"number": 5},
         },
     }
@@ -354,7 +354,7 @@ def test_poller_mention_on_issue_includes_instruction():
 
 # --- Task prompt ---
 
-from repocraft.dispatcher import _build_prompt
+from catocode.dispatcher import _build_prompt
 
 
 def test_task_prompt_pr_mention_includes_reply_instruction():
@@ -388,7 +388,7 @@ def test_task_prompt_issue_mention_includes_reply_instruction():
 
 def test_user_claude_md_task_has_reply_rule():
     """user_claude_md task section must include reply-to-PR/issue rule."""
-    from repocraft.templates.user_claude_md import get_user_claude_md
+    from catocode.templates.user_claude_md import get_user_claude_md
     md = get_user_claude_md()
     task_section = md[md.index("### `task`"):]
     assert "gh pr comment" in task_section or "reply" in task_section.lower()
@@ -396,7 +396,7 @@ def test_user_claude_md_task_has_reply_rule():
 
 # --- Prompts ---
 
-from repocraft.templates.prompts import (
+from catocode.templates.prompts import (
     fix_issue_prompt,
     patrol_prompt,
     triage_prompt,
@@ -441,7 +441,7 @@ def test_triage_prompt_includes_issue_content():
 
 # --- Dispatcher helpers ---
 
-from repocraft.dispatcher import _extract_summary, _slugify
+from catocode.dispatcher import _extract_summary, _slugify
 
 
 def test_extract_summary_from_result_json():
