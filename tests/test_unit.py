@@ -181,14 +181,13 @@ def test_store_patrol_budget_window_reset(tmp_path: Path):
     store.init_patrol_budget("r", max_issues=5, window_hours=1)
     store.decrement_patrol_budget("r")
     store.decrement_patrol_budget("r")
-    # Manually set window_start to 2 hours ago
+    # Manually set window_start to 2 hours ago via public db interface
     old_start = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-    with store._lock:
-        store._conn.execute(
-            "UPDATE patrol_budget SET window_start = ? WHERE repo_id = ?",
-            (old_start, "r"),
-        )
-        store._conn.commit()
+    store._db.execute(
+        "UPDATE patrol_budget SET window_start = ? WHERE repo_id = ?",
+        (old_start, "r"),
+    )
+    store._db.commit()
     # Budget should reset to max
     assert store.get_patrol_budget("r") == 5
 
