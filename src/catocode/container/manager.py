@@ -76,12 +76,16 @@ class ContainerManager:
         if container is None:
             self._build_image_if_needed()
             self._create_and_start(anthropic_api_key, github_token, anthropic_base_url)
+            new_container = self._get_container()
+            if new_container:
+                self._update_token(new_container, github_token)
             self._write_user_claude_md()
             self._configure_git_identity()
             return
 
         status = container.status
         if status == "running":
+            self._update_token(container, github_token)
             self._write_user_claude_md()
             self._configure_git_identity()
             return
@@ -93,6 +97,14 @@ class ContainerManager:
             container.reload()
         else:
             raise RuntimeError(f"Container in unexpected state: {status}")
+
+    def _update_token(self, container: docker.models.containers.Container, github_token: str) -> None:
+        """Update GITHUB_TOKEN for all future bash -l sessions inside the container."""
+        container.exec_run(
+            ["sh", "-c", f"echo 'export GITHUB_TOKEN={github_token}' > /etc/profile.d/catocode-token.sh"],
+            user="root",
+        )
+        logger.debug("Updated GITHUB_TOKEN in container")
 
     def _build_image_if_needed(self) -> None:
         try:
