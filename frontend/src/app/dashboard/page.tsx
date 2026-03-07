@@ -1,4 +1,4 @@
-import { getStats, getRepos, getActivities, getInstallUrl } from "@/lib/api";
+import { getStats, getRepos, getActivities } from "@/lib/api";
 import { StatCard } from "@/components/StatCard";
 import { RepoList } from "@/components/RepoList";
 import { ActivityTable } from "@/components/ActivityTable";
@@ -17,48 +17,81 @@ export default async function DashboardPage() {
     <div className="space-y-6">
       {/* Install CTA */}
       {noRepos && (
-        <div className="bg-blue-950 border border-blue-800 rounded-lg p-6 text-center">
-          <p className="text-blue-200 mb-4">
-            No repositories watched yet. Install the GitHub App to get started.
-          </p>
-          <Link
-            href="/install"
-            className="inline-block bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2 rounded-lg transition-colors"
-          >
-            Install GitHub App →
-          </Link>
+        <div className="relative overflow-hidden rounded-xl border border-accent/20 bg-gradient-to-r from-accent/10 via-surface-1 to-purple-600/10 p-6 text-center">
+          <div className="absolute inset-0 bg-gradient-to-r from-accent/5 to-purple-600/5" />
+          <div className="relative">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent/20 mb-4">
+              <span className="text-xl">🔗</span>
+            </div>
+            <p className="text-gray-300 mb-4 text-sm">
+              No repositories watched yet. Install the GitHub App to get started.
+            </p>
+            <Link
+              href="/install"
+              className="inline-flex items-center gap-2 bg-accent hover:bg-accent-light text-white font-semibold px-6 py-2.5 rounded-lg transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] glow-accent"
+            >
+              Install GitHub App
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </Link>
+          </div>
         </div>
       )}
 
       {/* Stat cards */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Repos Watched" value={stats.repos.watched} />
-          <StatCard label="Total Activities" value={stats.activities.total} />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            label="Repos Watched"
+            value={stats.repos.watched}
+            icon="📦"
+          />
+          <StatCard
+            label="Total Activities"
+            value={stats.activities.total}
+            icon="⚡"
+          />
           <StatCard
             label="Completed"
             value={stats.activities.by_status.done ?? 0}
-            accent="text-green-400"
+            icon="✅"
+            accent="text-emerald-400"
           />
           <StatCard
             label="Total Cost"
-            value={`$${stats.cost_usd.toFixed(4)}`}
-            accent="text-yellow-400"
+            value={`$${stats.cost_usd.toFixed(2)}`}
+            icon="💰"
+            accent="text-amber-400"
           />
         </div>
       )}
 
       {/* Repos */}
-      <div className="bg-gray-800 rounded-lg p-4">
-        <h2 className="text-sm font-semibold text-gray-300 mb-4">Watched Repositories</h2>
+      <section className="glass rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+            Watched Repositories
+          </h2>
+          <span className="text-xs text-gray-600">{repos?.length ?? 0} repos</span>
+        </div>
         <RepoList repos={repos ?? []} />
-      </div>
+      </section>
 
       {/* Recent Activities */}
-      <div className="bg-gray-800 rounded-lg p-4">
-        <h2 className="text-sm font-semibold text-gray-300 mb-4">Recent Activities</h2>
+      <section className="glass rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+            Recent Activities
+          </h2>
+          <span className="text-xs text-gray-600">
+            {(stats?.recent_activities ?? activities ?? []).length} entries
+          </span>
+        </div>
         <ActivityTable activities={stats?.recent_activities ?? activities ?? []} />
-      </div>
+      </section>
     </div>
   );
 }

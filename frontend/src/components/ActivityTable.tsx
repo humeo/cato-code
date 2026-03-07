@@ -1,11 +1,11 @@
 import type { Activity } from "@/lib/types";
 
-const STATUS_COLORS: Record<string, string> = {
-  done: "text-green-400 border-green-400",
-  failed: "text-red-400 border-red-400",
-  running: "text-blue-400 border-blue-400",
-  pending: "text-yellow-400 border-yellow-400",
-  pending_approval: "text-purple-400 border-purple-400",
+const STATUS_STYLES: Record<string, string> = {
+  done: "text-emerald-400 bg-emerald-400/10",
+  failed: "text-red-400 bg-red-400/10",
+  running: "text-blue-400 bg-blue-400/10",
+  pending: "text-amber-400 bg-amber-400/10",
+  pending_approval: "text-purple-400 bg-purple-400/10",
 };
 
 interface ActivityTableProps {
@@ -14,41 +14,49 @@ interface ActivityTableProps {
 
 export function ActivityTable({ activities }: ActivityTableProps) {
   if (!activities.length) {
-    return <p className="text-gray-500 text-sm">No activities yet.</p>;
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-gray-600">
+        <span className="text-2xl mb-2">📋</span>
+        <p className="text-sm">No activities yet.</p>
+      </div>
+    );
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto -mx-5 px-5">
       <table className="w-full text-xs">
         <thead>
-          <tr className="text-gray-500 border-b border-gray-700">
-            <th className="text-left py-2 pr-4">Repo</th>
-            <th className="text-left py-2 pr-4">Kind</th>
-            <th className="text-left py-2 pr-4">Trigger</th>
-            <th className="text-left py-2 pr-4">Status</th>
-            <th className="text-left py-2 pr-4">Cost</th>
-            <th className="text-left py-2">Updated</th>
+          <tr className="text-gray-500 border-b border-border-subtle">
+            <th className="text-left py-2.5 pr-4 font-medium uppercase tracking-wider">Repo</th>
+            <th className="text-left py-2.5 pr-4 font-medium uppercase tracking-wider">Kind</th>
+            <th className="text-left py-2.5 pr-4 font-medium uppercase tracking-wider">Trigger</th>
+            <th className="text-left py-2.5 pr-4 font-medium uppercase tracking-wider">Status</th>
+            <th className="text-left py-2.5 pr-4 font-medium uppercase tracking-wider">Cost</th>
+            <th className="text-left py-2.5 font-medium uppercase tracking-wider">Updated</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-700">
+        <tbody>
           {activities.map((a) => (
-            <tr key={a.id} className="text-gray-400">
-              <td className="py-1.5 pr-4 text-gray-300">{a.repo_id}</td>
-              <td className="py-1.5 pr-4">{a.kind}</td>
-              <td className="py-1.5 pr-4">{a.trigger ?? ""}</td>
-              <td className="py-1.5 pr-4">
+            <tr
+              key={a.id}
+              className="text-gray-400 border-b border-border-subtle/50 hover:bg-white/[0.02] transition-colors"
+            >
+              <td className="py-2.5 pr-4 text-gray-300 font-medium">{a.repo_id}</td>
+              <td className="py-2.5 pr-4">{a.kind}</td>
+              <td className="py-2.5 pr-4 font-mono text-gray-500">{a.trigger ?? ""}</td>
+              <td className="py-2.5 pr-4">
                 <span
-                  className={`px-2 py-0.5 rounded text-xs border ${
-                    STATUS_COLORS[a.status] ?? "text-gray-400 border-gray-400"
+                  className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                    STATUS_STYLES[a.status] ?? "text-gray-400 bg-gray-400/10"
                   }`}
                 >
-                  {a.status}
+                  {a.status.replace("_", " ")}
                 </span>
               </td>
-              <td className="py-1.5 pr-4">
+              <td className="py-2.5 pr-4 font-mono">
                 {a.cost_usd != null ? `$${a.cost_usd.toFixed(4)}` : "—"}
               </td>
-              <td className="py-1.5">
+              <td className="py-2.5 text-gray-500">
                 {a.updated_at ? a.updated_at.substring(0, 19).replace("T", " ") : ""}
               </td>
             </tr>

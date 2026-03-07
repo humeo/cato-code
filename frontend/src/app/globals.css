@@ -1,1 +1,53 @@
 @import "tailwindcss";
+
+@theme {
+  --color-surface-0: #0a0a0f;
+  --color-surface-1: #12121a;
+  --color-surface-2: #1a1a25;
+  --color-surface-3: #22222f;
+  --color-border-subtle: #2a2a3a;
+  --color-border-default: #33334a;
+  --color-accent: #6d5dfc;
+  --color-accent-light: #8b7dff;
+  --color-accent-dim: #4a3db8;
+}
+
+/* Glow effect for primary actions */
+.glow-accent {
+  box-shadow: 0 0 20px rgba(109, 93, 252, 0.3), 0 0 60px rgba(109, 93, 252, 0.1);
+}
+
+.glow-green {
+  box-shadow: 0 0 20px rgba(52, 211, 153, 0.3), 0 0 60px rgba(52, 211, 153, 0.1);
+}
+
+/* Subtle glass card */
+.glass {
+  background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
+  border: 1px solid rgba(255,255,255,0.06);
+  backdrop-filter: blur(8px);
+}
+
+/* Gradient text utility */
+.text-gradient {
+  background: linear-gradient(135deg, #6d5dfc, #a78bfa, #6d5dfc);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Smooth scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #33334a;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #44445a;
+}
