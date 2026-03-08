@@ -22,10 +22,19 @@ export interface Activity {
   kind: string;
   trigger: string | null;
   status: string;
+  pipeline_stage?: string;
   summary: string | null;
   cost_usd: number | null;
+  requires_approval?: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ActivityLog {
+  id: number;
+  activity_id: string;
+  line: string;
+  ts: string;
 }
 
 export interface Stats {

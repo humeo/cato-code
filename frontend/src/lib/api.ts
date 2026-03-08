@@ -1,4 +1,4 @@
-import type { User, Stats, Repo, Activity } from "./types";
+import type { User, Stats, Repo, Activity, ActivityLog } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -92,3 +92,17 @@ export async function deleteRepo(repoId: string): Promise<boolean> {
     return false;
   }
 }
+
+export async function getActivity(activityId: string): Promise<Activity | null> {
+  return apiFetch<Activity>(`/api/activities/${activityId}`);
+}
+
+export async function getActivityLogs(activityId: string): Promise<ActivityLog[] | null> {
+  return apiFetch<ActivityLog[]>(`/api/activities/${activityId}/logs`);
+}
+
+export function getLogStreamUrl(activityId: string): string {
+  return `${API_URL}/api/activities/${activityId}/logs/stream`;
+}
+
+export { API_URL };

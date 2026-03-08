@@ -1,7 +1,6 @@
 import { getStats, getRepos, getActivities } from "@/lib/api";
-import { StatCard } from "@/components/StatCard";
 import { RepoList } from "@/components/RepoList";
-import { ActivityTable } from "@/components/ActivityTable";
+import { LiveDashboard } from "@/components/LiveDashboard";
 import Link from "next/link";
 
 export default async function DashboardPage() {
@@ -39,33 +38,11 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Stat cards */}
-      {stats && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            label="Repos Watched"
-            value={stats.repos.watched}
-            icon="📦"
-          />
-          <StatCard
-            label="Total Activities"
-            value={stats.activities.total}
-            icon="⚡"
-          />
-          <StatCard
-            label="Completed"
-            value={stats.activities.by_status.done ?? 0}
-            icon="✅"
-            accent="text-emerald-400"
-          />
-          <StatCard
-            label="Total Cost"
-            value={`$${stats.cost_usd.toFixed(2)}`}
-            icon="💰"
-            accent="text-amber-400"
-          />
-        </div>
-      )}
+      {/* Live-updating stats + activities */}
+      <LiveDashboard
+        initialStats={stats}
+        initialActivities={stats?.recent_activities ?? activities ?? []}
+      />
 
       {/* Repos */}
       <section className="glass rounded-xl p-5">
@@ -77,20 +54,6 @@ export default async function DashboardPage() {
           <span className="text-xs text-gray-600">{repos?.length ?? 0} repos</span>
         </div>
         <RepoList repos={repos ?? []} />
-      </section>
-
-      {/* Recent Activities */}
-      <section className="glass rounded-xl p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-            Recent Activities
-          </h2>
-          <span className="text-xs text-gray-600">
-            {(stats?.recent_activities ?? activities ?? []).length} entries
-          </span>
-        </div>
-        <ActivityTable activities={stats?.recent_activities ?? activities ?? []} />
       </section>
     </div>
   );

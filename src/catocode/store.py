@@ -363,6 +363,13 @@ class Store:
             (activity_id,),
         )
 
+    def get_logs_after(self, activity_id: str, after_id: int = 0) -> list[dict]:
+        """Return log rows with id > after_id (for incremental / SSE streaming)."""
+        return self._db.execute(
+            "SELECT * FROM logs WHERE activity_id = ? AND id > ? ORDER BY id",
+            (activity_id, after_id),
+        )
+
     # --- processed events ---
 
     def is_event_processed(self, repo_id: str, event_id: str) -> bool:
