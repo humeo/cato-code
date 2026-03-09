@@ -38,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    # --- server (SaaS mode) ---
+    server_p = subparsers.add_parser("server", help="Run full SaaS server (OAuth + API + webhooks + scheduler)")
+    server_p.add_argument("--port", type=int, default=8000, help="Port to listen on (default: 8000)")
+    server_p.add_argument("--max-concurrent", type=int, default=3)
+
     # --- watch ---
     watch_p = subparsers.add_parser("watch", help="Watch a repo (auto-triage issues, patrol)")
     watch_p.add_argument("repo_url", help="GitHub repo URL")
@@ -153,6 +158,13 @@ async def cmd_unwatch(args: argparse.Namespace) -> int:
 
 # --- daemon ---
 
+async def cmd_server(args: argparse.Namespace) -> int:
+    """Run full SaaS server — equivalent to daemon with webhook port enabled."""
+    # Map server args to daemon-compatible namespace
+    args.webhook_port = args.port
+    return await cmd_daemon(args)
+
+
 async def cmd_daemon(args: argparse.Namespace) -> int:
     from .scheduler import Scheduler
     from .webhook.server import WebhookServer
@@ -174,7 +186,7 @@ async def cmd_daemon(args: argparse.Namespace) -> int:
         f"Auth: {auth.auth_type()}",
     ]
     if webhook_port:
-        info_lines.append(f"Webhook server: http://0.0.0.0:{webhook_port}")
+        info_lines.append(f"API server: http://0.0.0.0:{webhook_port}")
     info_lines.append("Press Ctrl+C to stop")
 
     console.print(Panel("\n".join(info_lines), border_style="green"))
@@ -191,10 +203,22 @@ async def cmd_daemon(args: argparse.Namespace) -> int:
 
     if webhook_port:
         import uvicorn
+        import os
 
-        webhook_server = WebhookServer(store, auth=auth)
+        # Use unified SaaS app when OAuth credentials are configured
+        oauth_client_id = os.environ.get("GITHUB_OAUTH_CLIENT_ID")
+        session_key = os.environ.get("SESSION_SECRET_KEY")
+        if oauth_client_id and session_key:
+            from .api.app import create_app
+            app = create_app(store=store, auth=auth)
+            console.print("[dim]SaaS mode: OAuth + API + webhooks on same port[/dim]")
+        else:
+            webhook_server = WebhookServer(store, auth=auth)
+            app = webhook_server.app
+            console.print("[dim]Legacy mode: webhook server only (set GITHUB_OAUTH_CLIENT_ID + SESSION_SECRET_KEY for SaaS)[/dim]")
+
         config = uvicorn.Config(
-            webhook_server.app,
+            app,
             host="0.0.0.0",
             port=webhook_port,
             log_level="warning",
@@ -450,6 +474,7 @@ async def run_async(args: argparse.Namespace) -> int:
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
 
     commands = {
+        "server": cmd_server,
         "watch": cmd_watch,
         "unwatch": cmd_unwatch,
         "daemon": cmd_daemon,

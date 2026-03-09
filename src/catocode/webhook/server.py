@@ -29,6 +29,14 @@ class WebhookServer:
         self._auth = auth or get_auth()
         self.app = FastAPI(title="CatoCode Webhook Server")
 
+        # Security check: warn if app webhook secret is not configured
+        if not get_github_app_webhook_secret():
+            logger.warning(
+                "GITHUB_APP_WEBHOOK_SECRET is not set — "
+                "the /webhook/app endpoint will accept unauthenticated requests. "
+                "Set this variable in production to prevent spoofed webhook events."
+            )
+
         # Dashboard UI + API
         self.app.get("/")(lambda: dashboard_html_route())
         self.app.include_router(make_dashboard_router(store))
@@ -420,6 +428,18 @@ class WebhookServer:
                         file_paths.append(fp)
         return file_paths
 
+    async def _index_repo_issues_background(self, repo_id: str, owner: str, repo_name: str) -> None:
+        """Background task: index all open issues for a newly-added repo."""
+        try:
+            github_token = await self._auth.get_token()
+            if not github_token:
+                return
+            from ..issue_indexer import index_repo_issues
+            count = await index_repo_issues(repo_id, owner, repo_name, github_token, self._store)
+            logger.info("Indexed %d issues for newly added repo %s", count, repo_id)
+        except Exception as e:
+            logger.warning("Background issue indexing failed for %s: %s", repo_id, e)
+
     async def _handle_installation_event(self, payload: dict, delivery_id: str) -> dict:
         """Handle GitHub App installation created/deleted events."""
         action = payload.get("action")
@@ -436,6 +456,7 @@ class WebhookServer:
             for repo_info in repos:
                 repo_url = f"https://github.com/{repo_info['full_name']}"
                 repo_id = repo_id_from_url(repo_url)
+                owner, repo_name = repo_info["full_name"].split("/", 1)
                 self._store.add_repo(repo_id, repo_url)
                 self._store.update_repo(repo_id, watch=1)
                 # Link repo to user if installation is associated with one
@@ -444,6 +465,10 @@ class WebhookServer:
                     self._store.update_repo(repo_id, user_id=user_id)
                 watched.append(repo_id)
                 logger.info("Auto-watched repo from App installation: %s", repo_id)
+                # Kick off background issue indexing for dedup
+                asyncio.ensure_future(
+                    self._index_repo_issues_background(repo_id, owner, repo_name)
+                )
             self._store.mark_webhook_event_processed(delivery_id)
             return {"status": "installation_created", "watched_repos": watched}
 
@@ -487,12 +512,16 @@ class WebhookServer:
         for repo_info in added:
             repo_url = f"https://github.com/{repo_info['full_name']}"
             repo_id = repo_id_from_url(repo_url)
+            owner, repo_name = repo_info["full_name"].split("/", 1)
             self._store.add_repo(repo_id, repo_url)
             self._store.update_repo(repo_id, watch=1)
             if user_id:
                 self._store.update_repo(repo_id, user_id=user_id)
             watched.append(repo_id)
             logger.info("Auto-watched repo added to installation: %s", repo_id)
+            asyncio.ensure_future(
+                self._index_repo_issues_background(repo_id, owner, repo_name)
+            )
 
         for repo_info in removed:
             repo_url = f"https://github.com/{repo_info['full_name']}"

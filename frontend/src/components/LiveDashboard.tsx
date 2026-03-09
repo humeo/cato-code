@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import type { Stats, Activity, Repo } from "@/lib/types";
-import { getStats, getActivities } from "@/lib/api";
+import { getStats, getActivities, getRepos } from "@/lib/api";
 import { StatCard } from "@/components/StatCard";
 import { RepoList } from "@/components/RepoList";
 import { GroupedActivityTable } from "@/components/GroupedActivityTable";
@@ -16,14 +16,17 @@ interface LiveDashboardProps {
 export function LiveDashboard({ initialStats, initialActivities, initialRepos }: LiveDashboardProps) {
   const [stats, setStats] = useState<Stats | null>(initialStats);
   const [activities, setActivities] = useState<Activity[]>(initialActivities);
+  const [repos, setRepos] = useState<Repo[]>(initialRepos);
 
   const refresh = useCallback(async () => {
-    const [newStats, newActivities] = await Promise.all([
+    const [newStats, newActivities, newRepos] = await Promise.all([
       getStats(),
       getActivities(),
+      getRepos(),
     ]);
     if (newStats) setStats(newStats);
     if (newActivities) setActivities(newActivities);
+    if (newRepos) setRepos(newRepos);
   }, []);
 
   useEffect(() => {
@@ -71,10 +74,10 @@ export function LiveDashboard({ initialStats, initialActivities, initialRepos }:
             Watched Repositories
           </h2>
           <span className="text-xs text-gray-600">
-            {initialRepos.length} repos
+            {repos.length} repos
           </span>
         </div>
-        <RepoList repos={initialRepos} />
+        <RepoList repos={repos} />
       </section>
 
       {/* Recent Activities — grouped by repo */}
@@ -88,7 +91,7 @@ export function LiveDashboard({ initialStats, initialActivities, initialRepos }:
             {displayActivities.length} entries
           </span>
         </div>
-        <GroupedActivityTable activities={displayActivities} repos={initialRepos} />
+        <GroupedActivityTable activities={displayActivities} repos={repos} />
       </section>
     </>
   );
