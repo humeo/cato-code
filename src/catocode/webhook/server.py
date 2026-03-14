@@ -12,7 +12,6 @@ from fastapi.responses import JSONResponse
 
 from ..auth import Auth, get_auth
 from ..config import get_github_app_webhook_secret, parse_repo_url, repo_id_from_url
-from ..dashboard import dashboard_html_route
 from ..dashboard import make_router as make_dashboard_router
 from ..decision import decide_engagement
 from ..github.commenter import post_issue_comment
@@ -39,8 +38,7 @@ class WebhookServer:
                 "Set this variable in production to prevent spoofed webhook events."
             )
 
-        # Dashboard UI + API
-        self.app.get("/")(lambda: dashboard_html_route())
+        # Dashboard API (unauthenticated)
         self.app.include_router(make_dashboard_router(store))
 
         # Per-repo webhook (personal token mode or manual setup)
@@ -161,7 +159,7 @@ class WebhookServer:
         # Create activity
         activity_id = self._store.add_activity(
             repo_id=repo_id,
-            kind=decision.activity_kind,
+            kind=decision.activity_kind or "",
             trigger=event.trigger,
         )
 
@@ -340,7 +338,7 @@ class WebhookServer:
             self._store.mark_webhook_event_processed(x_github_delivery)
             return JSONResponse({"status": "approved"})
 
-        activity_id = self._store.add_activity(repo_id, decision.activity_kind, event.trigger)
+        activity_id = self._store.add_activity(repo_id, decision.activity_kind or "", event.trigger)
         if decision.requires_approval:
             self._store.update_activity(activity_id, requires_approval=1)
             # For task activities, immediately post a comment so the user knows approval is needed
@@ -518,7 +516,6 @@ class WebhookServer:
 
     async def _handle_installation_repositories_event(self, payload: dict, delivery_id: str) -> dict:
         """Handle repos being added/removed from an existing GitHub App installation."""
-        action = payload.get("action")  # noqa: F841
         added = payload.get("repositories_added", [])
         removed = payload.get("repositories_removed", [])
 

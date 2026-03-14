@@ -1,0 +1,61 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - img "CatoCode" [ref=e4]
+      - generic [ref=e5]:
+        - heading "CatoCode" [level=1] [ref=e6]
+        - paragraph [ref=e7]: Autonomous Code Maintenance
+      - generic [ref=e8]:
+        - generic [ref=e11]: Online
+        - link "Add Repos" [ref=e13] [cursor=pointer]:
+          - /url: /install
+          - img [ref=e14]
+          - text: Add Repos
+        - generic [ref=e17]:
+          - img "humeo" [ref=e18]
+          - generic [ref=e19]: humeo
+          - button "Sign out" [ref=e20]
+    - generic [ref=e21]:
+      - generic [ref=e24]:
+        - generic [ref=e26]: 🔗
+        - paragraph [ref=e27]: No repositories watched yet. Install the GitHub App to get started.
+        - link "Install GitHub App" [ref=e28] [cursor=pointer]:
+          - /url: /install
+          - text: Install GitHub App
+          - img [ref=e29]
+      - generic [ref=e31]:
+        - generic [ref=e32]:
+          - generic [ref=e33]:
+            - paragraph [ref=e34]: Repos Watched
+            - generic [ref=e35]: 📦
+          - paragraph [ref=e36]: "0"
+        - generic [ref=e37]:
+          - generic [ref=e38]:
+            - paragraph [ref=e39]: Total Activities
+            - generic [ref=e40]: ⚡
+          - paragraph [ref=e41]: "0"
+        - generic [ref=e42]:
+          - generic [ref=e43]:
+            - paragraph [ref=e44]: Completed
+            - generic [ref=e45]: ✅
+          - paragraph [ref=e46]: "0"
+        - generic [ref=e47]:
+          - generic [ref=e48]:
+            - paragraph [ref=e49]: Total Cost
+            - generic [ref=e50]: 💰
+          - paragraph [ref=e51]: $0.00
+      - generic [ref=e52]:
+        - generic [ref=e53]:
+          - heading "Watched Repositories" [level=2] [ref=e54]: Watched Repositories
+          - generic [ref=e56]: 0 repos
+        - generic [ref=e57]:
+          - generic [ref=e58]: 📭
+          - paragraph [ref=e59]: No repositories yet.
+      - generic [ref=e60]:
+        - generic [ref=e61]:
+          - heading "Recent Activities" [level=2] [ref=e62]: Recent Activities
+          - generic [ref=e64]: 0 entries
+        - generic [ref=e65]:
+          - generic [ref=e66]: 📋
+          - paragraph [ref=e67]: No activities yet.
+  - alert [ref=e68]

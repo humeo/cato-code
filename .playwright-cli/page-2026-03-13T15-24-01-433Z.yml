@@ -1,0 +1,30 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]:
+        - img "CatoCode" [ref=e5]
+        - generic [ref=e6]:
+          - heading "CatoCode" [level=1] [ref=e7]
+          - paragraph [ref=e8]: Autonomous AI-powered GitHub repository maintenance
+      - generic [ref=e9]:
+        - generic [ref=e10]:
+          - generic [ref=e11]: 🔍
+          - generic [ref=e12]: Automatically reviews every PR with detailed feedback
+        - generic [ref=e13]:
+          - generic [ref=e14]: 💡
+          - generic [ref=e15]: Analyzes issues and proposes solutions before fixing
+        - generic [ref=e16]:
+          - generic [ref=e17]: 🛡️
+          - generic [ref=e18]: Proactive codebase patrol for bugs and security issues
+        - generic [ref=e19]:
+          - generic [ref=e20]: 📋
+          - generic [ref=e21]: Proof-of-Work evidence for every change
+      - generic [ref=e22]:
+        - link "Sign in with GitHub" [ref=e23] [cursor=pointer]:
+          - /url: http://localhost:8000/auth/github
+          - img [ref=e24]
+          - text: Sign in with GitHub
+        - paragraph [ref=e26]: By signing in you agree to our Terms of Service.
+  - button "Open Next.js Dev Tools" [ref=e33] [cursor=pointer]:
+    - img [ref=e34]
+  - alert [ref=e27]

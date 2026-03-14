@@ -1,0 +1,66 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - img "CatoCode" [ref=e4]
+      - generic [ref=e5]:
+        - heading "CatoCode" [level=1] [ref=e6]
+        - paragraph [ref=e7]: Autonomous Code Maintenance
+      - generic [ref=e8]:
+        - generic [ref=e11]: Online
+        - link "Add Repos" [ref=e13] [cursor=pointer]:
+          - /url: /install
+          - img [ref=e14]
+          - text: Add Repos
+        - generic [ref=e17]:
+          - img "humeo" [ref=e18]
+          - generic [ref=e19]: humeo
+          - button "Sign out" [ref=e20]
+    - generic [ref=e21]:
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - generic [ref=e24]:
+            - paragraph [ref=e25]: Repos Watched
+            - generic [ref=e26]: 📦
+          - paragraph [ref=e27]: "2"
+        - generic [ref=e28]:
+          - generic [ref=e29]:
+            - paragraph [ref=e30]: Total Activities
+            - generic [ref=e31]: ⚡
+          - paragraph [ref=e32]: "0"
+        - generic [ref=e33]:
+          - generic [ref=e34]:
+            - paragraph [ref=e35]: Completed
+            - generic [ref=e36]: ✅
+          - paragraph [ref=e37]: "0"
+        - generic [ref=e38]:
+          - generic [ref=e39]:
+            - paragraph [ref=e40]: Total Cost
+            - generic [ref=e41]: 💰
+          - paragraph [ref=e42]: $0.00
+      - generic [ref=e43]:
+        - generic [ref=e44]:
+          - heading "Watched Repositories" [level=2] [ref=e45]: Watched Repositories
+          - generic [ref=e47]: 2 repos
+        - generic [ref=e48]:
+          - generic [ref=e50]:
+            - link "humeo/catocode-test" [ref=e52] [cursor=pointer]:
+              - /url: https://github.com/humeo/catocode-test
+            - generic [ref=e53]: watching
+            - button "patrol" [ref=e54]
+            - button "Remove repository" [ref=e55]:
+              - img [ref=e56]
+          - generic [ref=e59]:
+            - link "humeo/repocraft-test" [ref=e61] [cursor=pointer]:
+              - /url: https://github.com/humeo/repocraft-test
+            - generic [ref=e62]: watching
+            - button "patrol" [ref=e63]
+            - button "Remove repository" [ref=e64]:
+              - img [ref=e65]
+      - generic [ref=e67]:
+        - generic [ref=e68]:
+          - heading "Recent Activities" [level=2] [ref=e69]: Recent Activities
+          - generic [ref=e71]: 0 entries
+        - generic [ref=e72]:
+          - generic [ref=e73]: 📋
+          - paragraph [ref=e74]: No activities yet.
+  - alert [ref=e75]

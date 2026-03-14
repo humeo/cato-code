@@ -1,0 +1,256 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - img "CatoCode" [ref=e4]
+      - generic [ref=e5]:
+        - heading "CatoCode" [level=1] [ref=e6]
+        - paragraph [ref=e7]: Autonomous Code Maintenance
+      - generic [ref=e8]:
+        - generic [ref=e11]: Online
+        - link "Add Repos" [ref=e13] [cursor=pointer]:
+          - /url: /install
+          - img [ref=e14]
+          - text: Add Repos
+        - generic [ref=e17]:
+          - img "Humeo" [ref=e18]
+          - generic [ref=e19]: Humeo
+          - button "Sign out" [ref=e20]
+    - generic [ref=e21]:
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - generic [ref=e24]:
+            - paragraph [ref=e25]: Repos Watched
+            - generic [ref=e26]: 📦
+          - paragraph [ref=e27]: "2"
+        - generic [ref=e28]:
+          - generic [ref=e29]:
+            - paragraph [ref=e30]: Total Activities
+            - generic [ref=e31]: ⚡
+          - paragraph [ref=e32]: "27"
+        - generic [ref=e33]:
+          - generic [ref=e34]:
+            - paragraph [ref=e35]: Completed
+            - generic [ref=e36]: ✅
+          - paragraph [ref=e37]: "22"
+        - generic [ref=e38]:
+          - generic [ref=e39]:
+            - paragraph [ref=e40]: Total Cost
+            - generic [ref=e41]: 💰
+          - paragraph [ref=e42]: $10.06
+      - generic [ref=e43]:
+        - generic [ref=e44]:
+          - heading "Watched Repositories" [level=2] [ref=e45]: Watched Repositories
+          - generic [ref=e47]: 2 repos
+        - generic [ref=e48]:
+          - generic [ref=e50]:
+            - link "Humeo/repocraft-test" [ref=e52] [cursor=pointer]:
+              - /url: https://github.com/Humeo/repocraft-test
+            - generic [ref=e53]: watching
+            - button "patrol" [ref=e54]
+            - button "Remove repository" [ref=e55]:
+              - img [ref=e56]
+          - generic [ref=e59]:
+            - link "Humeo/catocode-test" [ref=e61] [cursor=pointer]:
+              - /url: https://github.com/Humeo/catocode-test
+            - generic [ref=e62]: watching
+            - button "patrol" [ref=e63]
+            - button "Remove repository" [ref=e64]:
+              - img [ref=e65]
+      - generic [ref=e67]:
+        - generic [ref=e68]:
+          - heading "Recent Activities" [level=2] [ref=e69]: Recent Activities
+          - generic [ref=e71]: 20 entries
+        - generic [ref=e72]:
+          - generic [ref=e73]:
+            - button "Humeo/repocraft-test 14 activities" [ref=e74]:
+              - img [ref=e75]
+              - generic [ref=e77]: Humeo/repocraft-test
+              - generic [ref=e78]: 14 activities
+            - table [ref=e81]:
+              - rowgroup [ref=e82]:
+                - row "Kind Trigger Status Progress Cost Updated" [ref=e83]:
+                  - columnheader "Kind" [ref=e84]
+                  - columnheader "Trigger" [ref=e85]
+                  - columnheader "Status" [ref=e86]
+                  - columnheader "Progress" [ref=e87]
+                  - columnheader "Cost" [ref=e88]
+                  - columnheader "Updated" [ref=e89]
+              - rowgroup [ref=e90]:
+                - row "patrol budget:5 done $0.8616 2026-03-09 02:30:13" [ref=e91] [cursor=pointer]:
+                  - cell "patrol" [ref=e92]
+                  - cell "budget:5" [ref=e93]
+                  - cell "done" [ref=e94]:
+                    - generic [ref=e95]: done
+                  - cell [ref=e96]
+                  - cell "$0.8616" [ref=e101]
+                  - cell "2026-03-09 02:30:13" [ref=e102]
+                - row "patrol budget:5 done $1.2086 2026-03-08 10:21:18" [ref=e103] [cursor=pointer]:
+                  - cell "patrol" [ref=e104]
+                  - cell "budget:5" [ref=e105]
+                  - cell "done" [ref=e106]:
+                    - generic [ref=e107]: done
+                  - cell [ref=e108]
+                  - cell "$1.2086" [ref=e113]
+                  - cell "2026-03-08 10:21:18" [ref=e114]
+                - row "patrol budget:5 done $1.3100 2026-03-07 21:22:41" [ref=e115] [cursor=pointer]:
+                  - cell "patrol" [ref=e116]
+                  - cell "budget:5" [ref=e117]
+                  - cell "done" [ref=e118]:
+                    - generic [ref=e119]: done
+                  - cell [ref=e120]
+                  - cell "$1.3100" [ref=e125]
+                  - cell "2026-03-07 21:22:41" [ref=e126]
+                - row "analyze_issue issue:19 done $0.2090 2026-03-07 12:07:14" [ref=e127] [cursor=pointer]:
+                  - cell "analyze_issue" [ref=e128]
+                  - cell "issue:19" [ref=e129]
+                  - cell "done" [ref=e130]:
+                    - generic [ref=e131]: done
+                  - cell [ref=e132]
+                  - cell "$0.2090" [ref=e137]
+                  - cell "2026-03-07 12:07:14" [ref=e138]
+                - row "analyze_issue issue:18 done $0.3992 2026-03-07 11:35:20" [ref=e139] [cursor=pointer]:
+                  - cell "analyze_issue" [ref=e140]
+                  - cell "issue:18" [ref=e141]
+                  - cell "done" [ref=e142]:
+                    - generic [ref=e143]: done
+                  - cell [ref=e144]
+                  - cell "$0.3992" [ref=e149]
+                  - cell "2026-03-07 11:35:20" [ref=e150]
+                - row "analyze_issue issue:17 done $0.2502 2026-03-07 11:33:46" [ref=e151] [cursor=pointer]:
+                  - cell "analyze_issue" [ref=e152]
+                  - cell "issue:17" [ref=e153]
+                  - cell "done" [ref=e154]:
+                    - generic [ref=e155]: done
+                  - cell [ref=e156]
+                  - cell "$0.2502" [ref=e161]
+                  - cell "2026-03-07 11:33:46" [ref=e162]
+                - row "analyze_issue issue:16 done $0.2889 2026-03-07 11:32:36" [ref=e163] [cursor=pointer]:
+                  - cell "analyze_issue" [ref=e164]
+                  - cell "issue:16" [ref=e165]
+                  - cell "done" [ref=e166]:
+                    - generic [ref=e167]: done
+                  - cell [ref=e168]
+                  - cell "$0.2889" [ref=e173]
+                  - cell "2026-03-07 11:32:36" [ref=e174]
+                - row "analyze_issue issue:15 done $0.2640 2026-03-07 11:31:10" [ref=e175] [cursor=pointer]:
+                  - cell "analyze_issue" [ref=e176]
+                  - cell "issue:15" [ref=e177]
+                  - cell "done" [ref=e178]:
+                    - generic [ref=e179]: done
+                  - cell [ref=e180]
+                  - cell "$0.2640" [ref=e185]
+                  - cell "2026-03-07 11:31:10" [ref=e186]
+                - row "task issue:13:comment:4016288060 done $0.3358 2026-03-07 11:29:37" [ref=e187] [cursor=pointer]:
+                  - cell "task" [ref=e188]
+                  - cell "issue:13:comment:4016288060" [ref=e189]
+                  - cell "done" [ref=e190]:
+                    - generic [ref=e191]: done
+                  - cell [ref=e192]
+                  - cell "$0.3358" [ref=e197]
+                  - cell "2026-03-07 11:29:37" [ref=e198]
+                - row "analyze_issue issue:14 done $0.2300 2026-03-07 11:19:02" [ref=e199] [cursor=pointer]:
+                  - cell "analyze_issue" [ref=e200]
+                  - cell "issue:14" [ref=e201]
+                  - cell "done" [ref=e202]:
+                    - generic [ref=e203]: done
+                  - cell [ref=e204]
+                  - cell "$0.2300" [ref=e209]
+                  - cell "2026-03-07 11:19:02" [ref=e210]
+                - row "patrol budget:5 done $0.8785 2026-03-07 08:51:47" [ref=e211] [cursor=pointer]:
+                  - cell "patrol" [ref=e212]
+                  - cell "budget:5" [ref=e213]
+                  - cell "done" [ref=e214]:
+                    - generic [ref=e215]: done
+                  - cell [ref=e216]
+                  - cell "$0.8785" [ref=e221]
+                  - cell "2026-03-07 08:51:47" [ref=e222]
+                - row "fix_issue issue:6 done $0.8614 2026-03-07 08:10:16" [ref=e223] [cursor=pointer]:
+                  - cell "fix_issue" [ref=e224]
+                  - cell "issue:6" [ref=e225]
+                  - cell "done" [ref=e226]:
+                    - generic [ref=e227]: done
+                  - cell [ref=e228]
+                  - cell "$0.8614" [ref=e233]
+                  - cell "2026-03-07 08:10:16" [ref=e234]
+                - row "fix_issue issue:5 done $0.4863 2026-03-07 07:18:30" [ref=e235] [cursor=pointer]:
+                  - cell "fix_issue" [ref=e236]
+                  - cell "issue:5" [ref=e237]
+                  - cell "done" [ref=e238]:
+                    - generic [ref=e239]: done
+                  - cell [ref=e240]
+                  - cell "$0.4863" [ref=e245]
+                  - cell "2026-03-07 07:18:30" [ref=e246]
+                - row "fix_issue issue:5 done $0.4469 2026-03-07 07:09:12" [ref=e247] [cursor=pointer]:
+                  - cell "fix_issue" [ref=e248]
+                  - cell "issue:5" [ref=e249]
+                  - cell "done" [ref=e250]:
+                    - generic [ref=e251]: done
+                  - cell [ref=e252]
+                  - cell "$0.4469" [ref=e257]
+                  - cell "2026-03-07 07:09:12" [ref=e258]
+          - generic [ref=e259]:
+            - button "Humeo/catocode-test 6 activities" [ref=e260]:
+              - img [ref=e261]
+              - generic [ref=e263]: Humeo/catocode-test
+              - generic [ref=e264]: 6 activities
+            - table [ref=e267]:
+              - rowgroup [ref=e268]:
+                - row "Kind Trigger Status Progress Cost Updated" [ref=e269]:
+                  - columnheader "Kind" [ref=e270]
+                  - columnheader "Trigger" [ref=e271]
+                  - columnheader "Status" [ref=e272]
+                  - columnheader "Progress" [ref=e273]
+                  - columnheader "Cost" [ref=e274]
+                  - columnheader "Updated" [ref=e275]
+              - rowgroup [ref=e276]:
+                - row "patrol budget:5 done $0.1766 2026-03-08 17:00:09" [ref=e277] [cursor=pointer]:
+                  - cell "patrol" [ref=e278]
+                  - cell "budget:5" [ref=e279]
+                  - cell "done" [ref=e280]:
+                    - generic [ref=e281]: done
+                  - cell [ref=e282]
+                  - cell "$0.1766" [ref=e287]
+                  - cell "2026-03-08 17:00:09" [ref=e288]
+                - row "patrol budget:5 failed — 2026-03-08 16:13:37" [ref=e289] [cursor=pointer]:
+                  - cell "patrol" [ref=e290]
+                  - cell "budget:5" [ref=e291]
+                  - cell "failed" [ref=e292]:
+                    - generic [ref=e293]: failed
+                  - cell [ref=e294]
+                  - cell "—" [ref=e299]
+                  - cell "2026-03-08 16:13:37" [ref=e300]
+                - row "analyze_issue issue:4 done $0.1365 2026-03-08 13:34:21" [ref=e301] [cursor=pointer]:
+                  - cell "analyze_issue" [ref=e302]
+                  - cell "issue:4" [ref=e303]
+                  - cell "done" [ref=e304]:
+                    - generic [ref=e305]: done
+                  - cell [ref=e306]
+                  - cell "$0.1365" [ref=e311]
+                  - cell "2026-03-08 13:34:21" [ref=e312]
+                - row "patrol budget:5 done $0.0753 2026-03-08 03:15:38" [ref=e313] [cursor=pointer]:
+                  - cell "patrol" [ref=e314]
+                  - cell "budget:5" [ref=e315]
+                  - cell "done" [ref=e316]:
+                    - generic [ref=e317]: done
+                  - cell [ref=e318]
+                  - cell "$0.0753" [ref=e323]
+                  - cell "2026-03-08 03:15:38" [ref=e324]
+                - row "patrol budget:5 done $0.1504 2026-03-07 14:24:12" [ref=e325] [cursor=pointer]:
+                  - cell "patrol" [ref=e326]
+                  - cell "budget:5" [ref=e327]
+                  - cell "done" [ref=e328]:
+                    - generic [ref=e329]: done
+                  - cell [ref=e330]
+                  - cell "$0.1504" [ref=e335]
+                  - cell "2026-03-07 14:24:12" [ref=e336]
+                - row "init auto done — 2026-03-07 14:23:43" [ref=e337] [cursor=pointer]:
+                  - cell "init" [ref=e338]
+                  - cell "auto" [ref=e339]
+                  - cell "done" [ref=e340]:
+                    - generic [ref=e341]: done
+                  - cell [ref=e342]
+                  - cell "—" [ref=e347]
+                  - cell "2026-03-07 14:23:43" [ref=e348]
+  - button "Open Next.js Dev Tools" [ref=e354] [cursor=pointer]:
+    - img [ref=e355]
+  - alert [ref=e358]

@@ -1,12 +1,3 @@
-export interface User {
-  id: string;
-  github_login: string;
-  github_email: string | null;
-  avatar_url: string | null;
-  created_at: string;
-  last_login_at: string;
-}
-
 export interface Repo {
   id: string;
   repo_url: string;

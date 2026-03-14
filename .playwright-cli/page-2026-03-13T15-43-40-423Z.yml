@@ -1,0 +1,375 @@
+- generic [ref=e2]:
+  - region
+  - generic [ref=e3]:
+    - link "Skip to content" [ref=e4] [cursor=pointer]:
+      - /url: "#start-of-content"
+    - banner "Global Navigation Menu" [ref=e8]:
+      - generic [ref=e9]:
+        - generic [ref=e10]:
+          - button "Open menu" [ref=e12] [cursor=pointer]:
+            - img [ref=e13]
+          - link "Homepage (g then d)" [ref=e15] [cursor=pointer]:
+            - /url: /
+            - img [ref=e16]
+        - button "Search or jump to…" [ref=e21] [cursor=pointer]:
+          - generic [ref=e22]:
+            - generic:
+              - img
+            - generic [ref=e23]:
+              - generic:
+                - text: Type
+                - generic: /
+                - text: to search
+        - generic [ref=e24]:
+          - generic [ref=e25]:
+            - generic [ref=e27]:
+              - link "Chat with Copilot" [ref=e29] [cursor=pointer]:
+                - /url: /copilot
+                - img [ref=e30]
+              - button "Open Copilot…" [ref=e34] [cursor=pointer]:
+                - generic:
+                  - img
+            - button "Create new..." [ref=e36] [cursor=pointer]:
+              - generic [ref=e37]:
+                - generic:
+                  - img
+              - generic:
+                - img
+            - link "Issues (g then i)" [ref=e38] [cursor=pointer]:
+              - /url: /issues
+              - img [ref=e39]
+            - link "Pull requests (g then p)" [ref=e42] [cursor=pointer]:
+              - /url: /pulls
+              - img [ref=e43]
+            - link "Repositories" [ref=e45] [cursor=pointer]:
+              - /url: /repos
+              - img [ref=e46]
+          - link "You have no unread notifications (g then n)" [ref=e48] [cursor=pointer]:
+            - /url: /notifications
+            - img [ref=e49]
+          - button "Open user navigation menu" [ref=e52] [cursor=pointer]:
+            - img "Luca" [ref=e53]
+  - main [ref=e56]:
+    - generic [ref=e57]:
+      - generic "Luca (humeo) settings" [ref=e58]:
+        - generic [ref=e59]:
+          - img "@humeo" [ref=e60]
+          - generic [ref=e61]:
+            - heading "Luca (humeo) settings" [level=1] [ref=e62]:
+              - link "Luca (humeo)" [ref=e63] [cursor=pointer]:
+                - /url: /humeo
+              - generic [ref=e64]: settings
+            - paragraph [ref=e66]: Your personal account
+        - link "Go to your personal profile" [ref=e68] [cursor=pointer]:
+          - /url: /humeo
+      - generic [ref=e69]:
+        - navigation "User settings" [ref=e73]:
+          - list [ref=e75]:
+            - listitem [ref=e76]:
+              - link "Public profile" [ref=e77] [cursor=pointer]:
+                - /url: /settings/profile
+                - generic:
+                  - img
+                - generic [ref=e78]: Public profile
+            - listitem [ref=e79]:
+              - link "Account" [ref=e80] [cursor=pointer]:
+                - /url: /settings/admin
+                - generic:
+                  - img
+                - generic [ref=e81]: Account
+            - listitem [ref=e82]:
+              - link "Appearance" [ref=e83] [cursor=pointer]:
+                - /url: /settings/appearance
+                - generic:
+                  - img
+                - generic [ref=e84]: Appearance
+            - listitem [ref=e85]:
+              - link "Accessibility" [ref=e86] [cursor=pointer]:
+                - /url: /settings/accessibility
+                - generic:
+                  - img
+                - generic [ref=e87]: Accessibility
+            - listitem [ref=e88]:
+              - link "Notifications" [ref=e89] [cursor=pointer]:
+                - /url: /settings/notifications
+                - generic:
+                  - img
+                - generic [ref=e90]: Notifications
+            - listitem [ref=e91]
+            - listitem [ref=e92]:
+              - generic [ref=e95]:
+                - heading "Access" [level=2] [ref=e97]
+                - list "Access" [ref=e98]:
+                  - listitem [ref=e99]:
+                    - button "Billing and licensing" [ref=e100] [cursor=pointer]:
+                      - generic:
+                        - img
+                      - generic [ref=e101]: Billing and licensing
+                      - generic:
+                        - img
+                  - listitem [ref=e102]:
+                    - link "Emails" [ref=e103] [cursor=pointer]:
+                      - /url: /settings/emails
+                      - generic:
+                        - img
+                      - generic [ref=e104]: Emails
+                  - listitem [ref=e105]:
+                    - link "Password and authentication" [ref=e106] [cursor=pointer]:
+                      - /url: /settings/security
+                      - generic:
+                        - img
+                      - generic [ref=e107]: Password and authentication
+                  - listitem [ref=e108]:
+                    - link "Sessions" [ref=e109] [cursor=pointer]:
+                      - /url: /settings/sessions
+                      - generic:
+                        - img
+                      - generic [ref=e110]: Sessions
+                  - listitem [ref=e111]:
+                    - link "SSH and GPG keys" [ref=e112] [cursor=pointer]:
+                      - /url: /settings/keys
+                      - generic:
+                        - img
+                      - generic [ref=e113]: SSH and GPG keys
+                  - listitem [ref=e114]:
+                    - link "Organizations" [ref=e115] [cursor=pointer]:
+                      - /url: /settings/organizations
+                      - generic:
+                        - img
+                      - generic [ref=e116]: Organizations
+                  - listitem [ref=e117]:
+                    - link "Enterprises" [ref=e118] [cursor=pointer]:
+                      - /url: /settings/enterprises
+                      - generic:
+                        - generic:
+                          - img
+                      - generic [ref=e119]: Enterprises
+                  - listitem [ref=e120]:
+                    - button "Moderation" [ref=e121] [cursor=pointer]:
+                      - generic:
+                        - img
+                      - generic [ref=e122]: Moderation
+                      - generic:
+                        - img
+            - listitem [ref=e123]
+            - listitem [ref=e124]:
+              - generic [ref=e127]:
+                - heading "Code, planning, and automation" [level=2] [ref=e129]
+                - list "Code, planning, and automation" [ref=e130]:
+                  - listitem [ref=e131]:
+                    - link "Repositories" [ref=e132] [cursor=pointer]:
+                      - /url: /settings/repositories
+                      - generic:
+                        - img
+                      - generic [ref=e133]: Repositories
+                  - listitem [ref=e134]:
+                    - link "Codespaces" [ref=e135] [cursor=pointer]:
+                      - /url: /settings/codespaces
+                      - generic:
+                        - img
+                      - generic [ref=e136]: Codespaces
+                  - listitem [ref=e137]:
+                    - link "Models Preview feature" [ref=e138] [cursor=pointer]:
+                      - /url: /settings/models
+                      - generic:
+                        - img
+                      - generic [ref=e139]: Models
+                      - generic:
+                        - generic "Preview feature": Preview
+                  - listitem [ref=e140]:
+                    - link "Packages" [ref=e141] [cursor=pointer]:
+                      - /url: /settings/packages
+                      - generic:
+                        - img
+                      - generic [ref=e142]: Packages
+                  - listitem [ref=e143]:
+                    - button "Copilot" [ref=e144] [cursor=pointer]:
+                      - generic:
+                        - img
+                      - generic [ref=e145]: Copilot
+                      - generic:
+                        - img
+                  - listitem [ref=e146]:
+                    - link "Pages" [ref=e147] [cursor=pointer]:
+                      - /url: /settings/pages
+                      - generic:
+                        - img
+                      - generic [ref=e148]: Pages
+                  - listitem [ref=e149]:
+                    - link "Saved replies" [ref=e150] [cursor=pointer]:
+                      - /url: /settings/replies
+                      - generic:
+                        - img
+                      - generic [ref=e151]: Saved replies
+            - listitem [ref=e152]
+            - listitem [ref=e153]:
+              - generic [ref=e156]:
+                - heading "Security" [level=2] [ref=e158]
+                - list "Security" [ref=e159]:
+                  - listitem [ref=e160]:
+                    - link "Code security" [ref=e161] [cursor=pointer]:
+                      - /url: /settings/security_analysis
+                      - generic:
+                        - img
+                      - generic [ref=e162]: Code security
+            - listitem [ref=e163]
+            - listitem [ref=e164]:
+              - generic [ref=e167]:
+                - heading "Integrations" [level=3] [ref=e169]
+                - list "Integrations" [ref=e170]:
+                  - listitem [ref=e171]:
+                    - link "Applications" [ref=e172] [cursor=pointer]:
+                      - /url: /settings/installations
+                      - generic:
+                        - img
+                      - generic [ref=e173]: Applications
+                  - listitem [ref=e174]:
+                    - link "Scheduled reminders" [ref=e175] [cursor=pointer]:
+                      - /url: /settings/reminders
+                      - generic:
+                        - img
+                      - generic [ref=e176]: Scheduled reminders
+            - listitem [ref=e177]
+            - listitem [ref=e178]:
+              - generic [ref=e181]:
+                - heading "Archives" [level=2] [ref=e183]
+                - list "Archives" [ref=e184]:
+                  - listitem [ref=e185]:
+                    - link "Security log" [ref=e186] [cursor=pointer]:
+                      - /url: /settings/security-log
+                      - generic:
+                        - img
+                      - generic [ref=e187]: Security log
+                  - listitem [ref=e188]:
+                    - link "Sponsorship log" [ref=e189] [cursor=pointer]:
+                      - /url: /settings/sponsors-log
+                      - generic:
+                        - img
+                      - generic [ref=e190]: Sponsorship log
+            - listitem [ref=e191]
+            - listitem [ref=e192]:
+              - link "Developer settings" [ref=e193] [cursor=pointer]:
+                - /url: /settings/apps
+                - generic:
+                  - img
+                - generic [ref=e194]: Developer settings
+        - generic [ref=e198]:
+          - generic [ref=e199]:
+            - img "CatoCode-Bot" [ref=e201]
+            - generic [ref=e202]:
+              - heading "CatoCode-Bot" [level=2] [ref=e203]
+              - generic [ref=e204]:
+                - generic [ref=e205]:
+                  - img [ref=e206]
+                  - text: Installed March 7, 2026 14:55last week
+                - generic [ref=e208]:
+                  - img [ref=e209]
+                  - text: Developed by
+                  - link "humeo" [ref=e211] [cursor=pointer]:
+                    - /url: /humeo
+                - generic [ref=e212]:
+                  - img [ref=e213]
+                  - link "App settings" [ref=e215] [cursor=pointer]:
+                    - /url: /settings/apps/catocode-bot
+                - generic [ref=e216]:
+                  - img [ref=e217]
+                  - link "https://app.catocode.com" [ref=e219] [cursor=pointer]:
+                    - /url: https://app.catocode.com
+          - heading "Permissions" [level=2] [ref=e221]
+          - list [ref=e222]:
+            - listitem [ref=e223]:
+              - img [ref=e224]
+              - strong [ref=e226]: Read
+              - text: access to metadata
+            - listitem [ref=e227]:
+              - img [ref=e228]
+              - strong [ref=e230]: Read
+              - text: and
+              - strong [ref=e231]: write
+              - text: access to code, issues, and pull requests
+          - heading "Repository access" [level=2] [ref=e233]
+          - generic [ref=e234]:
+            - generic [ref=e237]:
+              - radiogroup [ref=e239]:
+                - generic [ref=e240]:
+                  - generic [ref=e241]:
+                    - radio "All repositories" [ref=e242] [cursor=pointer]
+                    - generic [ref=e243]:
+                      - generic [ref=e244] [cursor=pointer]: All repositories
+                      - generic [ref=e245]: This applies to all current and future repositories owned by the resource owner. Also includes public repositories (read-only).
+                  - generic [ref=e246]:
+                    - radio "Only select repositories" [checked] [ref=e247] [cursor=pointer]
+                    - generic [ref=e248]:
+                      - generic [ref=e249] [cursor=pointer]: Only select repositories
+                      - generic [ref=e250]: Select at least one repository. Also includes public repositories (read-only).
+              - generic [ref=e252]:
+                - group [ref=e253]:
+                  - button "Select repositories" [ref=e254] [cursor=pointer]:
+                    - img [ref=e255]
+                    - text: Select repositories
+                - generic [ref=e257]: Selected 2 repositories.
+                - generic [ref=e258]:
+                  - generic [ref=e260]:
+                    - img [ref=e261]
+                    - button "Remove repocraft-test" [ref=e263] [cursor=pointer]:
+                      - img [ref=e266]
+                    - generic [ref=e268]:
+                      - generic [ref=e269]: humeo
+                      - text: /repocraft-test
+                  - generic [ref=e271]:
+                    - img [ref=e272]
+                    - button "Remove catocode-test" [ref=e274] [cursor=pointer]:
+                      - img [ref=e277]
+                    - generic [ref=e279]:
+                      - generic [ref=e280]: humeo
+                      - text: /catocode-test
+            - button "Save" [disabled] [ref=e281]:
+              - generic [ref=e283]: Save
+          - button "Cancel" [disabled] [ref=e284]:
+            - generic [ref=e286]: Cancel
+          - heading "Danger zone" [level=2] [ref=e288]
+          - generic [ref=e289]:
+            - generic [ref=e290]:
+              - button "Suspend" [ref=e292] [cursor=pointer]
+              - strong [ref=e293]: Suspend your installation
+              - generic [ref=e294]: This will block the app access to your resources.
+            - generic [ref=e295]:
+              - button "Uninstall" [ref=e297] [cursor=pointer]
+              - strong [ref=e298]: Uninstall "CatoCode-Bot"
+              - generic [ref=e299]: This will remove the app and revoke access to all resources.
+  - contentinfo [ref=e300]:
+    - heading "Footer" [level=2] [ref=e301]
+    - generic [ref=e302]:
+      - generic [ref=e303]:
+        - link "GitHub Homepage" [ref=e304] [cursor=pointer]:
+          - /url: https://github.com
+          - img [ref=e305]
+        - generic [ref=e307]: © 2026 GitHub, Inc.
+      - navigation "Footer" [ref=e308]:
+        - heading "Footer navigation" [level=3] [ref=e309]
+        - list "Footer navigation" [ref=e310]:
+          - listitem [ref=e311]:
+            - link "Terms" [ref=e312] [cursor=pointer]:
+              - /url: https://docs.github.com/site-policy/github-terms/github-terms-of-service
+          - listitem [ref=e313]:
+            - link "Privacy" [ref=e314] [cursor=pointer]:
+              - /url: https://docs.github.com/site-policy/privacy-policies/github-privacy-statement
+          - listitem [ref=e315]:
+            - link "Security" [ref=e316] [cursor=pointer]:
+              - /url: https://github.com/security
+          - listitem [ref=e317]:
+            - link "Status" [ref=e318] [cursor=pointer]:
+              - /url: https://www.githubstatus.com/
+          - listitem [ref=e319]:
+            - link "Community" [ref=e320] [cursor=pointer]:
+              - /url: https://github.community/
+          - listitem [ref=e321]:
+            - link "Docs" [ref=e322] [cursor=pointer]:
+              - /url: https://docs.github.com/
+          - listitem [ref=e323]:
+            - link "Contact" [ref=e324] [cursor=pointer]:
+              - /url: https://support.github.com?tags=dotcom-footer
+          - listitem [ref=e325]:
+            - button "Manage cookies" [ref=e327] [cursor=pointer]
+          - listitem [ref=e328]:
+            - button "Do not share my personal information" [ref=e330] [cursor=pointer]
