@@ -74,8 +74,8 @@ catocode fix https://github.com/owner/repo/issues/42
 # Show watched repos and recent activity
 catocode status
 
-# Tail recent logs
-catocode logs
+# View logs for an activity (get activity ID from `catocode status`)
+catocode logs <activity_id>
 ```
 
 > **Tip**: 使用 Docker Compose 时，在命令前加 `docker compose exec catocode`，例如 `docker compose exec catocode catocode watch ...`。
@@ -90,7 +90,7 @@ catocode logs
 │  CLI Daemon                                          │
 │  ├── Scheduler (approval check, patrol, dispatch)   │
 │  ├── Webhook Server (/webhook/github/{repo_id})      │
-│  └── Store (SQLite at ~/.catocode/catocode.db)       │
+│  └── Store (SQLite at /data/catocode.db)       │
 └──────────────────┬──────────────────────────────────┘
                    │ Docker API
 ┌─ Worker Container ──────────────────────────────────┐
@@ -132,6 +132,7 @@ cp .env.example .env
 |------|------|------|
 | `ANTHROPIC_API_KEY` | ✅ | Anthropic API 密钥 |
 | `GITHUB_TOKEN` | ✅ | GitHub PAT（需要 `repo` 权限） |
+| `PORT` | | 服务监听端口（默认 `8000`） |
 | `GIT_USER_NAME` | | 容器内 Git 提交用户名（默认 `CatoCode`） |
 | `GIT_USER_EMAIL` | | 容器内 Git 提交邮箱（默认 `catocode@bot.local`） |
 | `MAX_CONCURRENT` | | 最大并发任务数（默认 `3`） |
