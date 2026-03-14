@@ -1,138 +1,118 @@
-# 🏛️ CatoCode
+<div align="center">
 
-**The Autonomous GitHub Code Maintenance Agent**
+<img src="frontend/public/logo.svg" width="80" height="80" alt="CatoCode" />
 
-> Named after Cato the Elder, the Roman statesman renowned for his unwavering integrity. CatoCode never compromises—every bug fix comes with proof, every claim backed by evidence.
+# CatoCode
+
+### 修 bug 要手动复现、修复、验证——CatoCode 替你做完这三步
 
 [![CI](https://github.com/humeo/cato-code/actions/workflows/ci.yml/badge.svg)](https://github.com/humeo/cato-code/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.12+-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-required-blue)](https://www.docker.com/)
 
----
+[快速开始](#-快速开始) · [工作原理](#-工作原理) · [CLI 参考](#-cli-参考) · [配置](#-配置) · [贡献](#-贡献)
 
-## 🎯 What Is CatoCode?
-
-CatoCode is an **autonomous agent** that monitors your GitHub repositories and:
-
-- **Fixes bugs** — reproduces them first, then patches, then verifies
-- **Reviews PRs** — catches quality issues before merge
-- **Triages issues** — classifies, labels, and responds automatically
-- **Patrols code** — proactively scans for security issues and bugs
-
-Every action includes **Proof of Work**: before/after evidence so you can verify results in 30 seconds without manual testing.
-
-```markdown
-| Check            | Before               | After       |
-|------------------|----------------------|-------------|
-| Failing test     | ❌ FAIL              | ✅ PASS     |
-| Full test suite  | 41 passed, 1 failed  | 42 passed   |
-```
+</div>
 
 ---
 
-## 🚀 Quick Start
+> [!IMPORTANT]
+> **CatoCode 会做什么：**
+> - 在本地运行 Docker 容器（隔离执行环境）
+> - 调用 Anthropic API（你的代码片段会发送给 Anthropic 用于分析）
+> - 向 GitHub 发送 comment、创建 PR
+>
+> **CatoCode 不会做什么：**
+> - 不会将代码发送给除 Anthropic 以外的第三方
+> - 不会在没有你 `/approve` 的情况下自动提交代码（默认审批流）
+>
+> **如何停止：** `docker compose down` 立即停止所有活动。
+
+---
+
+## 问题
+
+你打开 GitHub，看到 12 个 open issues。
+
+每修一个 bug，流程都一样：读 issue → 本地复现 → 定位原因 → 写修复 → 跑测试 → 提 PR。重复、耗时、容易出错。
+
+AI 代码补全工具（Copilot、Cursor）能帮你写代码，但它们不会主动监听你的 repo、不会自己复现 bug、也不会给你留下可验证的证据。Devin 这类全自动工具走向另一个极端——你不知道它改了什么，也不知道该不该信任结果。
+
+CatoCode 的定位在中间：**自动执行，但每一步都留证据，你来决定是否合并。**
+
+---
+
+## 快速开始
 
 ```bash
 git clone https://github.com/humeo/cato-code.git
 cd cato-code
-cp .env.example .env          # 编辑 .env，填入 ANTHROPIC_API_KEY 和 GITHUB_TOKEN
-docker compose up -d          # 启动服务
+cp .env.example .env          # 填入 ANTHROPIC_API_KEY 和 GITHUB_TOKEN
+docker compose up -d
 docker compose exec catocode catocode watch https://github.com/owner/repo
 ```
 
-详细步骤见下方 [Docker Compose 部署](#-docker-compose-recommended)。
+详细步骤见 [Docker Compose 部署](#-docker-compose-部署)。
 
 ---
 
-## 🔄 How It Works
+## 看它工作
 
-1. **New issue opened** on GitHub → webhook fires to CatoCode
-2. **Daemon receives** the event → `analyze_issue` activity created
-3. **Docker worker container** spins up (built automatically on first run)
-4. **Claude Agent** analyzes the issue, posts a comment with analysis + proposed solutions
-5. **You reply** `/approve` on the GitHub issue
-6. **CatoCode** creates a PR with the fix + Proof of Work evidence
+Issue 开启 → CatoCode 分析并评论 → 你回复 `/approve` → PR 创建，附带测试证据。全程约 5 分钟，你只需要审一个 PR。
+
+完整流程：
+
+```
+# 1. 监听你的 repo
+$ docker compose exec catocode catocode watch https://github.com/alice/myproject
+✓ GitHub App has access to alice/myproject
+Watching https://github.com/alice/myproject
+
+# 2. 有人开了一个 issue：
+#   "Bug: calculate_average() crashes when list is empty"
+
+# 3. CatoCode 自动分析，在 issue 下留评论：
+#   "我复现了这个 bug。根本原因是 ZeroDivisionError。
+#    建议修复：在 calculate_average() 开头加空列表检查。
+#    回复 /approve 让我执行修复。"
+
+# 4. 你回复 /approve
+
+# 5. CatoCode 执行修复，创建 PR，附带 Proof of Work：
+$ catocode status
+done  88b7ce3b  fix_issue  issue:42  $0.68
+
+# PR 描述里包含：
+# | Check           | Before              | After      |
+# |-----------------|---------------------|------------|
+# | Failing test    | ❌ ZeroDivisionError | ✅ PASS    |
+# | Full test suite | 11 passed, 1 failed | 12 passed  |
+```
+
+你在 30 秒内就能验证结果——不需要本地跑测试。
 
 ---
 
-## 📋 CLI Reference
+## Docker Compose 部署
+
+Docker Compose 是推荐的部署方式，不需要本地安装 Python。
+
+### 1. Clone & 配置
 
 ```bash
-# Watch a repo (registers in local DB)
-catocode watch https://github.com/owner/repo
-
-# Stop watching a repo
-catocode unwatch https://github.com/owner/repo
-
-# Start the daemon (webhook server + scheduler)
-catocode daemon --webhook-port 8080
-
-# Fix a specific issue immediately (no webhook needed)
-catocode fix https://github.com/owner/repo/issues/42
-
-# Show watched repos and recent activity
-catocode status
-
-# View logs for an activity (get activity ID from `catocode status`)
-catocode logs <activity_id>
-```
-
-> **Tip**: 使用 Docker Compose 时，在命令前加 `docker compose exec catocode`，例如 `docker compose exec catocode catocode watch ...`。
-> 本地开发时使用 `uv run catocode watch ...`。
-
----
-
-## 🏗️ Architecture
-
-```
-┌─ Host Process ──────────────────────────────────────┐
-│  CLI Daemon                                          │
-│  ├── Scheduler (approval check, patrol, dispatch)   │
-│  ├── Webhook Server (/webhook/github/{repo_id})      │
-│  └── Store (SQLite at /data/catocode.db)       │
-└──────────────────┬──────────────────────────────────┘
-                   │ Docker API
-┌─ Worker Container ──────────────────────────────────┐
-│  catocode-worker                                    │
-│  ├── Claude Agent SDK + Claude Code CLI             │
-│  ├── Dev tools (git, gh, python, node, uv)          │
-│  └── /repos/{owner-repo}/ (cloned repos)            │
-└─────────────────────────────────────────────────────┘
-```
-
-The Docker image is built automatically on first run (~5–10 minutes). Subsequent starts reuse the cached image.
-
-### Skills
-
-CatoCode uses Markdown prompt templates called **skills**:
-
-| Skill | Trigger | What It Does |
-|-------|---------|--------------|
-| `analyze_issue` | Issue opened | Analyzes issue, posts plan, waits for `/approve` |
-| `fix_issue` | After `/approve` | Reproduces → patches → verifies → creates PR |
-| `review_pr` | PR opened | Reviews code quality, security, tests |
-| `respond_review` | PR review comments | Addresses feedback, pushes updates |
-| `triage` | Issue opened | Classifies and labels issues |
-| `patrol` | Scheduled | Proactive scan for bugs/security issues |
-
-Skills live in `src/catocode/container/skills/` and can be customized without code changes.
-
----
-
-## ⚙️ Configuration
-
-All configuration through environment variables. Copy `.env.example` to `.env` and edit:
-
-```bash
+git clone https://github.com/humeo/cato-code.git
+cd cato-code
 cp .env.example .env
 ```
+
+编辑 `.env`，填入必填项：
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
 | `ANTHROPIC_API_KEY` | ✅ | Anthropic API 密钥 |
 | `GITHUB_TOKEN` | ✅ | GitHub PAT（需要 `repo` 权限） |
-| `PORT` | | 服务监听端口（默认 `8000`） |
+| `PORT` | | 服务端口（默认 `8000`） |
 | `GIT_USER_NAME` | | 容器内 Git 提交用户名（默认 `CatoCode`） |
 | `GIT_USER_EMAIL` | | 容器内 Git 提交邮箱（默认 `catocode@bot.local`） |
 | `MAX_CONCURRENT` | | 最大并发任务数（默认 `3`） |
@@ -143,56 +123,43 @@ cp .env.example .env
 
 完整变量列表见 [`.env.example`](.env.example)。
 
----
-
-## 🐳 Docker Compose (Recommended)
-
-Docker Compose 是最简单的部署方式，不需要本地安装 Python/uv。
-
-### 1. Clone & Configure
-
-```bash
-git clone https://github.com/humeo/cato-code.git
-cd cato-code
-cp .env.example .env
-```
-
-编辑 `.env`，填入你的配置值。CLI 模式下必填项：
-
-| 变量 | 说明 | 示例 |
-|------|------|------|
-| `ANTHROPIC_API_KEY` | Anthropic API 密钥 | `sk-ant-...` |
-| `GITHUB_TOKEN` | GitHub Personal Access Token (需要 `repo` 权限) | `ghp_...` |
-
-其他变量都有默认值，可按需调整（容器资源、巡检频率、Git 身份等），详见 `.env.example` 中的注释。
-
-### 2. Start
+### 2. 启动
 
 ```bash
 docker compose up -d
 ```
 
-CatoCode 服务启动在端口 `8000`（可通过 `.env` 中的 `PORT` 修改）。
+首次启动会自动构建 Docker 镜像（约 5–10 分钟），后续复用缓存。
 
-首次启动会自动构建 Docker 镜像（约 5-10 分钟），后续启动复用缓存。
-
-### 3. Watch a Repo
+### 3. 监听 Repo
 
 ```bash
 docker compose exec catocode catocode watch https://github.com/owner/repo
 ```
 
-### 4. Check Status
+### 4. 查看状态
 
 ```bash
-# 查看监听的仓库和最近活动
+# 查看监听的 repo 和最近活动
 docker compose exec catocode catocode status
 
-# 查看日志
+# 查看容器日志
 docker compose logs -f catocode
 ```
 
-### 5. (Optional) Expose Webhook
+### 5. Dashboard（可选）
+
+前端 Dashboard 提供可视化的 repo 状态和活动历史：
+
+```bash
+cd frontend
+cp .env.example .env.local   # 默认值即可
+bun install
+bun dev
+# 打开 http://localhost:3000
+```
+
+### 6. 配置 Webhook（可选）
 
 没有 webhook，CatoCode 仍然可以工作（patrol 巡检 + `fix` 命令）。配置 webhook 后可以**实时**响应新 issue 和 PR。
 
@@ -211,89 +178,147 @@ cloudflared tunnel --url http://localhost:8000
 
 > `{owner-repo}` 格式为 `owner-repo`，例如 `alice-myproject`
 
-### 6. (Optional) Frontend Dashboard
+---
 
-前端 Dashboard 提供可视化的仓库状态和活动历史，CLI 模式下无需登录。
+## CLI 参考
 
 ```bash
-cd frontend
-cp .env.example .env.local   # 默认值即可，无需修改
-bun install
-bun dev
-# 打开 http://localhost:3000
+# 监听一个 repo（注册到本地 DB）
+catocode watch https://github.com/owner/repo
+
+# 停止监听
+catocode unwatch https://github.com/owner/repo
+
+# 启动 daemon（webhook server + scheduler）
+catocode daemon --webhook-port 8080
+
+# 立即修复一个 issue（无需 webhook）
+catocode fix https://github.com/owner/repo/issues/42
+
+# 查看监听的 repo 和最近活动
+catocode status
+
+# 查看某个 activity 的日志（activity ID 从 status 获取）
+catocode logs <activity_id>
 ```
 
-> **Note**: Docker Compose 挂载了 Docker socket，使 CatoCode 能管理 worker 容器。数据通过 Docker volume（`catocode-data`）持久化。
+> **Tip**: Docker Compose 部署时在命令前加 `docker compose exec catocode`。
+> 本地开发时使用 `uv run catocode`。
 
 ---
 
-## 🔐 GitHub App Mode (Advanced)
+## 工作原理
 
-For teams and organizations, GitHub App mode offers:
-- Automatic installation across all repos in an org
-- OAuth dashboard with per-user activity tracking
-- No need to manually configure webhooks per repo
+```
+┌─ Host Process ──────────────────────────────────────┐
+│  CLI Daemon                                          │
+│  ├── Scheduler (approval check, patrol, dispatch)   │
+│  ├── Webhook Server (/webhook/github/{repo_id})      │
+│  └── Store (SQLite at /data/catocode.db)             │
+└──────────────────┬──────────────────────────────────┘
+                   │ Docker API
+┌─ Worker Container ──────────────────────────────────┐
+│  catocode-worker                                    │
+│  ├── Claude Agent SDK + Claude Code CLI             │
+│  ├── Dev tools (git, gh, python, node, uv)          │
+│  └── /repos/{owner-repo}/ (cloned repos)            │
+└─────────────────────────────────────────────────────┘
+```
 
-See [docs/GITHUB_APP_SETUP.md](docs/GITHUB_APP_SETUP.md) for setup instructions.
+**事件流：**
+
+1. GitHub issue 开启 → webhook 触发（或 patrol 定时扫描）
+2. Decision engine 分类事件，选择 skill
+3. Worker 容器执行 Claude Agent，分析 issue，发布评论
+4. 你回复 `/approve`
+5. Agent 复现 bug → 写修复 → 跑测试 → 创建 PR，附带 Proof of Work
+
+<details>
+<summary><b>Skills 详情</b> — 每种自动化任务的触发条件和行为</summary>
+
+Skills 是 Markdown 提示模板，存放在 `src/catocode/container/skills/`，可以直接编辑定制，无需改代码。
+
+| Skill | 触发条件 | 行为 |
+|-------|---------|------|
+| `analyze_issue` | Issue 开启 | 分析 issue，发布分析评论，等待 `/approve` |
+| `fix_issue` | `/approve` 后 | 复现 → 修复 → 验证 → 创建 PR（含 Proof of Work） |
+| `review_pr` | PR 开启 | 审查代码质量、安全性、测试覆盖 |
+| `respond_review` | PR review 评论 | 处理 review 反馈，推送更新 |
+| `triage` | Issue 开启 | 分类并打标签 |
+| `patrol` | 定时触发 | 主动扫描代码库，发现潜在 bug 和安全问题 |
+
+</details>
+
+<details>
+<summary><b>审批流</b> — 如何控制 CatoCode 的行为</summary>
+
+默认情况下，CatoCode 在执行修复前需要你的明确授权：
+
+1. Issue 开启 → `analyze_issue` 发布分析评论，末尾附 "回复 `/approve` 继续"
+2. 你（或有 write 权限的协作者）回复 `/approve`
+3. Scheduler 检测到 approve 评论 → 创建 `fix_issue` activity
+4. 修复执行，PR 创建，包含完整 Proof of Work
+
+如果你信任某个 repo，可以通过修改 `analyze_issue` skill 跳过审批步骤。
+
+</details>
 
 ---
 
-## 🧪 Development
+## GitHub App 模式（进阶）
+
+适合团队和组织：
+- 自动覆盖 org 下所有 repo，无需逐个配置 webhook
+- 无需手动管理 PAT
+
+见 [docs/GITHUB_APP_SETUP.md](docs/GITHUB_APP_SETUP.md)。
+
+---
+
+## 开发
 
 ```bash
-# Install dependencies (including dev tools)
+# 安装依赖（含开发工具）
 uv sync --dev
 
-# Run all tests
+# 运行测试
 uv run pytest
 
-# Run with coverage
+# 带覆盖率
 uv run pytest --cov=src/catocode
 
-# Run integration tests (requires Docker)
+# 集成测试（需要 Docker）
 uv run pytest -m integration
 
 # Lint
 uv run ruff check src/
 uv run ruff check src/ --fix
 
-# Frontend
+# 前端
 cd frontend && bun install && bun dev
 ```
 
 ---
 
-## 🤝 Contributing
+## 贡献
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Make your changes and add tests
-4. Run tests: `uv run pytest`
-5. Commit: `git commit -m "feat: add amazing feature"`
-6. Open a PR
-
----
-
-## 🔒 Security
-
-- Your code never leaves your infrastructure (except the Anthropic API)
-- GitHub token stored locally in `.env` — never committed
-- CatoCode runs in an isolated Docker container with limited permissions
-- All commits are attributed to the configured `GIT_USER_NAME` / `GIT_USER_EMAIL`
+1. Fork 仓库
+2. 创建 feature 分支：`git checkout -b feature/amazing-feature`
+3. 修改并添加测试
+4. 运行测试：`uv run pytest`
+5. 提交：`git commit -m "feat: add amazing feature"`
+6. 开 PR
 
 ---
 
-## 📄 License
+## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) for details.
+Apache License 2.0 — 详见 [LICENSE](LICENSE)。
 
 ---
 
 <div align="center">
 
-**"Integrity is doing the right thing, even when no one is watching."**
-— Cato the Elder
-
-[Quick Start](#-quick-start) • [Docker Deploy](#-docker-compose-recommended) • [CLI Reference](#-cli-reference) • [Contributing](#-contributing)
+[快速开始](#-快速开始) · [Docker 部署](#-docker-compose-部署) · [CLI 参考](#-cli-参考) · [贡献](#-贡献)
 
 </div>
