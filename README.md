@@ -1,18 +1,19 @@
 <div align="center">
 
 <picture>
-  <img src="docs/images/banner.png" width="100%" alt="CatoCode — Autonomous Code Maintenance Agent" />
+  <img src="docs/images/banner.png" width="100%" alt="CatoCode — Autonomous GitHub Repository Maintenance Agent" />
 </picture>
 
 <br />
+
+<h3>Autonomous GitHub repository maintenance agent</h3>
+
 <br />
 
 [![CI](https://github.com/humeo/cato-code/actions/workflows/ci.yml/badge.svg)](https://github.com/humeo/cato-code/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.12+-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-required-blue)](https://www.docker.com/)
-
-**A long-running AI agent that autonomously maintains GitHub repositories — triages issues, fixes bugs with verifiable evidence, reviews PRs, and proactively patrols for security vulnerabilities.**
 
 <br />
 
@@ -24,6 +25,7 @@
 
 > [!IMPORTANT]
 > **Transparency notice:**
+>
 > - All code analysis runs inside isolated Docker containers on your infrastructure — no code leaves your machine except to the Anthropic API
 > - CatoCode posts comments and opens PRs on your behalf, but **never merges without your explicit `/approve`**
 > - Every action produces a verifiable evidence chain (before/after test results) — you can audit exactly what happened and why
@@ -36,7 +38,7 @@
 
 Maintaining a codebase is an ongoing commitment. Issues pile up, PRs wait for review, security vulnerabilities go unnoticed, and the backlog only grows when the team is focused on feature work.
 
-Today's AI coding tools address part of the problem — but they all share the same limitation: **they stop working when you close the laptop.** Copilot and Cursor are powerful, but reactive — they wait inside your editor for you to ask. Fully autonomous agents like Devin can work independently, but produce opaque results that are hard to trust or verify.
+Today's AI coding tools address part of the problem — but they all share the same limitation: **they stop working when you close the laptop.** Copilot and Cursor are powerful, but reactive — they wait inside your editor for you to ask.
 
 CatoCode takes a different approach: **a long-running agent that stays beside your repository 24/7.** It watches for new issues and PRs, responds within seconds, and handles the repetitive maintenance loop autonomously — reproduce, analyze, fix, test, open PR. But unlike a black-box agent, every action is backed by a two-layer evidence chain: proof the bug exists before the fix, and proof the fix works after. You review a PR with a before/after evidence table and decide in 30 seconds whether to merge.
 
@@ -164,78 +166,18 @@ You review a PR with full evidence attached. 30 seconds to verify — no local t
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Event Flow
-
-```
-GitHub Event                    Host Process                     Worker Container
-─────────────                   ────────────                     ────────────────
-Issue opened ──webhook──→ Parse & deduplicate
-                          Decision engine: analyze_issue
-                          Store activity (pending)
-                                    │
-                          Dispatch loop picks it up
-                          Acquire repo lock + semaphore
-                                    │
-                          Build skill prompt ──────────→ Clone repo
-                                                        Run Claude Agent SDK
-                                                        Reproduce bug
-                                                        ← JSONL logs stream back
-                          Store logs + cost              Post analysis comment
-                                                        "Reply /approve to proceed"
-
-User replies /approve     Approval loop detects it
-                          Create fix_issue activity
-                                    │
-                          Dispatch ────────────────────→ Reproduce (Layer 1 evidence)
-                                                        Write fix
-                                                        Verify (Layer 2 evidence)
-                                                        Run full test suite
-                                                        Commit + open PR
-                                                        ← Result with cost_usd
-                          Mark activity done
-```
-
-### Dual-Mode Operation
-
-CatoCode auto-detects its operating mode at startup:
-
-| | CLI Mode | SaaS Mode |
-|---|---|---|
-| **Detection** | Default | `GITHUB_OAUTH_CLIENT_ID` + `SESSION_SECRET_KEY` set |
-| **Auth** | Personal access token | GitHub App + OAuth 2.0 |
-| **Containers** | Shared worker | Per-user isolated workers |
-| **Data scope** | Global | User-scoped (ownership checks on all endpoints) |
-| **Frontend** | Optional dashboard | Full dashboard with auth |
-| **Commands** | `watch`, `daemon`, `fix` | `server` (unified) |
-
-### Key Engineering Decisions
-
-| Decision | Rationale |
-|----------|-----------|
-| **Per-repo serial lock + global semaphore** | Prevents concurrent modifications to the same repo while allowing parallel work across repos |
-| **Dual-layer timeout** (10min idle + 2hr hard) | Idle timeout catches stuck agents early; hard timeout prevents runaway cost |
-| **3x retry with repo reset** | Transient failures (network, API rate limits) recover automatically; repo reset ensures clean state per attempt |
-| **Session resume** | `respond_review` keeps the PR branch intact (no reset) and resumes the prior Claude session for context continuity |
-| **Markdown skill templates** | Decouples agent behavior from application code; non-engineers can modify agent capabilities |
-| **Two-stage RAG dedup** | Vector embedding recall (fast, cheap) → LLM judgment (accurate, focused); keyword overlap fallback when embedding service is down |
-| **Fernet-encrypted token storage** | GitHub access tokens encrypted at rest with PBKDF2-SHA256 derived key (100K iterations) |
-| **HMAC-SHA256 with constant-time compare** | Webhook signature verification immune to timing attacks |
-| **Dual DB backend** (SQLite / PostgreSQL) | Single-user deploys get zero-config SQLite; production SaaS scales to PostgreSQL — same Python API, placeholder rewriting at the abstraction layer |
-
----
-
 ## Skills
 
 Skills are Markdown prompt templates in `src/catocode/container/skills/`. Edit them directly — no code changes needed.
 
-| Skill | Trigger | Behavior |
-|-------|---------|----------|
-| `analyze_issue` | Issue opened | Pull code, reproduce, analyze root cause, check for duplicates via RAG, post comment, wait for `/approve` |
-| `fix_issue` | After `/approve` | Reproduce (Layer 1) → fix → verify (Layer 2) → open PR with before/after evidence table |
-| `review_pr` | PR opened | Review code quality, security, test coverage, post structured review |
-| `respond_review` | PR review comment | Resume session, address feedback, push new commits (never force-push) |
-| `triage` | Issue opened | Classify (bug/feature/question/duplicate), attempt quick reproduction, apply labels |
-| `patrol` | Scheduled | Proactively scan changed files for security/bugs, file issues with evidence, respect rolling-window budget |
+| Skill            | Trigger           | Behavior                                                                                                   |
+| ---------------- | ----------------- | ---------------------------------------------------------------------------------------------------------- |
+| `analyze_issue`  | Issue opened      | Pull code, reproduce, analyze root cause, check for duplicates via RAG, post comment, wait for `/approve`  |
+| `fix_issue`      | After `/approve`  | Reproduce (Layer 1) → fix → verify (Layer 2) → open PR with before/after evidence table                    |
+| `review_pr`      | PR opened         | Review code quality, security, test coverage, post structured review                                       |
+| `respond_review` | PR review comment | Resume session, address feedback, push new commits (never force-push)                                      |
+| `triage`         | Issue opened      | Classify (bug/feature/question/duplicate), attempt quick reproduction, apply labels                        |
+| `patrol`         | Scheduled         | Proactively scan changed files for security/bugs, file issues with evidence, respect rolling-window budget |
 
 ### Proof of Work Protocol
 
@@ -302,16 +244,16 @@ cp .env.example .env
 
 Edit `.env`:
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
-| `GITHUB_TOKEN` | Yes | GitHub PAT with `repo` scope |
-| `PORT` | | Service port (default: `8000`) |
-| `GIT_USER_NAME` | | Commit author name (default: `CatoCode`) |
-| `GIT_USER_EMAIL` | | Commit author email (default: `catocode@bot.local`) |
-| `MAX_CONCURRENT` | | Max concurrent tasks (default: `3`) |
-| `CATOCODE_MEM` | | Worker container memory limit (default: `8g`) |
-| `CATOCODE_CPUS` | | Worker container CPU limit (default: `4`) |
+| Variable            | Required | Description                                         |
+| ------------------- | -------- | --------------------------------------------------- |
+| `ANTHROPIC_API_KEY` | Yes      | Anthropic API key                                   |
+| `GITHUB_TOKEN`      | Yes      | GitHub PAT with `repo` scope                        |
+| `PORT`              |          | Service port (default: `8000`)                      |
+| `GIT_USER_NAME`     |          | Commit author name (default: `CatoCode`)            |
+| `GIT_USER_EMAIL`    |          | Commit author email (default: `catocode@bot.local`) |
+| `MAX_CONCURRENT`    |          | Max concurrent tasks (default: `3`)                 |
+| `CATOCODE_MEM`      |          | Worker container memory limit (default: `8g`)       |
+| `CATOCODE_CPUS`     |          | Worker container CPU limit (default: `4`)           |
 
 Full variable list: [`.env.example`](.env.example)
 
@@ -392,16 +334,16 @@ catocode daemon --webhook-port 8080
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Agent runtime | Claude Agent SDK, Claude Code CLI |
-| Backend | Python 3.12, FastAPI, asyncio, uvicorn |
-| Container orchestration | Docker SDK (Python), per-user named volumes |
-| Database | SQLite (dev) / PostgreSQL (prod), dual-backend abstraction |
-| Authentication | GitHub App (JWT + installation tokens), OAuth 2.0, Fernet encryption |
-| Frontend | Next.js 15, React 19, TypeScript, Tailwind CSS 4 |
-| Embeddings | OpenAI-compatible API, cosine similarity (pure Python) |
-| Package management | uv (Python), bun (JS/TS) |
+| Layer                   | Technology                                                           |
+| ----------------------- | -------------------------------------------------------------------- |
+| Agent runtime           | Claude Agent SDK, Claude Code CLI                                    |
+| Backend                 | Python 3.12, FastAPI, asyncio, uvicorn                               |
+| Container orchestration | Docker SDK (Python), per-user named volumes                          |
+| Database                | SQLite (dev) / PostgreSQL (prod), dual-backend abstraction           |
+| Authentication          | GitHub App (JWT + installation tokens), OAuth 2.0, Fernet encryption |
+| Frontend                | Next.js 15, React 19, TypeScript, Tailwind CSS 4                     |
+| Embeddings              | OpenAI-compatible API, cosine similarity (pure Python)               |
+| Package management      | uv (Python), bun (JS/TS)                                             |
 
 ---
 
