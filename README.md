@@ -332,21 +332,6 @@ catocode daemon --webhook-port 8080
 
 ---
 
-## Tech Stack
-
-| Layer                   | Technology                                                           |
-| ----------------------- | -------------------------------------------------------------------- |
-| Agent runtime           | Claude Agent SDK, Claude Code CLI                                    |
-| Backend                 | Python 3.12, FastAPI, asyncio, uvicorn                               |
-| Container orchestration | Docker SDK (Python), per-user named volumes                          |
-| Database                | SQLite (dev) / PostgreSQL (prod), dual-backend abstraction           |
-| Authentication          | GitHub App (JWT + installation tokens), OAuth 2.0, Fernet encryption |
-| Frontend                | Next.js 15, React 19, TypeScript, Tailwind CSS 4                     |
-| Embeddings              | OpenAI-compatible API, cosine similarity (pure Python)               |
-| Package management      | uv (Python), bun (JS/TS)                                             |
-
----
-
 ## Development
 
 ```bash
