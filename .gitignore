@@ -72,3 +72,6 @@ openspec/
 scripts/
 readme-header.html
 docs/*.md
+
+skills-lock.json
+.python-version
