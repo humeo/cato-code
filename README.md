@@ -6,7 +6,7 @@
 
 <br />
 
-<h3>Autonomous GitHub repository maintenance agent</h3>
+<h3>CatoCode: Autonomous GitHub repository maintenance agent</h3>
 
 <br />
 
