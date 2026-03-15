@@ -43,7 +43,8 @@ output/
 *.jpg
 *.jpeg
 assets/
-!readme-banner.png
+!docs/images/
+!docs/images/**
 
 # Frontend generated files
 frontend/next-env.d.ts
@@ -70,3 +71,4 @@ frontend/tsconfig.tsbuildinfo
 openspec/
 scripts/
 readme-header.html
+docs/*.md

@@ -1,7 +1,7 @@
 <div align="center">
 
 <picture>
-  <img src="readme-banner.png" width="100%" alt="CatoCode — 长时运行的代码库维护助手" />
+  <img src="docs/images/banner.png" width="100%" alt="CatoCode — 长时运行的代码库维护助手" />
 </picture>
 
 <br />
