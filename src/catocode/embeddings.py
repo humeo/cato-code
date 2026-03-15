@@ -13,17 +13,17 @@ import os
 logger = logging.getLogger(__name__)
 
 EMBEDDING_API_KEY = os.environ.get("EMBEDDING_API_KEY", "")
-EMBEDDING_BASE_URL = os.environ.get("EMBEDDING_BASE_URL", "https://yunwu.ai/v1")
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-large")
+EMBEDDING_BASE_URL = os.environ.get("EMBEDDING_BASE_URL", "")
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "")
 
 # Haiku model for cheap summarization (override via SUMMARY_MODEL env var)
-SUMMARY_MODEL = os.environ.get("SUMMARY_MODEL", "claude-haiku-4-5-20251001")
+SUMMARY_MODEL = os.environ.get("SUMMARY_MODEL", "")
 
 
 def _get_openai_client():
     """Return async OpenAI client pointed at the configured base URL."""
     from openai import AsyncOpenAI
-    if not EMBEDDING_API_KEY:
+    if not EMBEDDING_API_KEY or not EMBEDDING_BASE_URL:
         return None
     return AsyncOpenAI(api_key=EMBEDDING_API_KEY, base_url=EMBEDDING_BASE_URL)
 
@@ -55,7 +55,7 @@ async def normalize_issue_summary(title: str, body: str, comments: list[str]) ->
     import anthropic
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
+    if not api_key or not SUMMARY_MODEL:
         return title
 
     base_url = os.environ.get("ANTHROPIC_BASE_URL")
@@ -107,7 +107,7 @@ Output ONLY the JSON, no other text."""
 
 def is_embedding_service_configured() -> bool:
     """Check if embedding service is available."""
-    return bool(EMBEDDING_API_KEY)
+    return bool(EMBEDDING_API_KEY and EMBEDDING_BASE_URL and EMBEDDING_MODEL)
 
 
 async def check_embedding_service() -> tuple[bool, str]:
