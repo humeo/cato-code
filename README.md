@@ -12,9 +12,11 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-required-blue)](https://www.docker.com/)
 
+**A long-running AI agent that autonomously maintains GitHub repositories — triages issues, fixes bugs with verifiable evidence, reviews PRs, and proactively patrols for security vulnerabilities.**
+
 <br />
 
-[Hosted Service](#-hosted-service) · [Quick Start](#-quick-start) · [See It Work](#-see-it-work) · [Design](#-design) · [How It Works](#-how-it-works) · [CLI](#-cli-reference) · [Contributing](#-contributing)
+[Hosted Service](#hosted-service) · [Quick Start](#quick-start) · [See It Work](#see-it-work) · [Architecture](#architecture) · [Skills](#skills) · [CLI](#cli-reference) · [Contributing](#contributing)
 
 </div>
 
@@ -64,7 +66,7 @@ docker compose up -d
 docker compose exec catocode catocode watch https://github.com/owner/repo
 ```
 
-Once running, CatoCode responds to new issues and PRs automatically. Full setup details in [Deployment](#-deployment).
+Once running, CatoCode responds to new issues and PRs automatically. Full setup details in [Deployment](#deployment).
 
 ---
 
@@ -109,6 +111,187 @@ You review a PR with full evidence attached. 30 seconds to verify — no local t
 
 ---
 
+## Architecture
+
+### Design Principles
+
+**Best harness, best model.** CatoCode uses the Claude Agent SDK to drive Claude Code CLI inside a container with a full dev toolchain (git, gh, python, node, uv). The agent reads code, writes code, runs tests, commits, and opens PRs — the same workflow as a real developer, not a thin API wrapper.
+
+**Security first, system-level isolation.** Every task runs in an isolated Docker container — resource-limited, no host filesystem access. In SaaS mode, each user gets an independent container with dedicated named volumes.
+
+**Skills over features.** Each capability is a standalone Markdown prompt template in `skills/`. Want to add a new capability? Write a `SKILL.md` — no Python changes required. The system scales by adding Skills, not by accumulating features.
+
+**Proof of Work.** Every fix requires: failure evidence before + passing evidence after + full test suite with no regressions. The PR description contains a verifiable before/after table. You can decide in 30 seconds whether to merge.
+
+### System Overview
+
+```
+┌─ Host Process ──────────────────────────────────────────────────┐
+│                                                                  │
+│  ┌─ Scheduler ─────────────────────────────────────────────┐    │
+│  │  Approval Loop (30s)  — poll issue comments for /approve │    │
+│  │  Patrol Loop (3600s)  — scan repos for new vulnerabilities│   │
+│  │  Dispatch Loop (5s)   — pick pending → execute in container│  │
+│  │                                                          │    │
+│  │  Concurrency: per-repo asyncio.Lock + global Semaphore   │    │
+│  └──────────────────────────────────────────────────────────┘    │
+│                                                                  │
+│  ┌─ Webhook Server ────────┐  ┌─ Decision Engine ───────────┐   │
+│  │  /webhook/github/{repo} │→ │  Event → Skill routing      │   │
+│  │  /webhook/app (App-lvl) │  │  Bot loop prevention        │   │
+│  │  HMAC-SHA256 verify     │  │  Deduplication (delivery ID) │   │
+│  └─────────────────────────┘  └─────────────────────────────┘   │
+│                                                                  │
+│  ┌─ Dispatcher ────────────────────────────────────────────┐    │
+│  │  Skill prompt rendering (Markdown + variable substitution)│   │
+│  │  Dual-layer timeout (10min idle + 2hr hard)              │    │
+│  │  3x retry with repo reset between attempts               │    │
+│  │  JSONL log streaming → DB (real-time cost tracking)      │    │
+│  │  Session resume for multi-turn activities                │    │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  ┌─ API (SaaS mode) ──────┐  ┌─ Store ─────────────────────┐   │
+│  │  OAuth 2.0 + Sessions   │  │  SQLite / PostgreSQL        │   │
+│  │  20+ REST endpoints     │  │  12 tables, 15 migrations   │   │
+│  │  SSE log streaming      │  │  Ownership-scoped queries   │   │
+│  │  Patrol management      │  │  Rolling-window budgets     │   │
+│  └─────────────────────────┘  └─────────────────────────────┘   │
+│                                                                  │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │ Docker API
+┌─ Worker Container (per-user in SaaS) ──────────────────────────┐
+│  catocode-worker[-{user_id}]                                    │
+│  ├── Claude Agent SDK (bypassPermissions, fully autonomous)     │
+│  ├── Dev tools: git, gh, python, node, uv, playwright           │
+│  ├── /repos/{owner-repo}/ (shallow clone, reset per activity)   │
+│  └── Named volumes (repos + agent memory persist across tasks)  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Event Flow
+
+```
+GitHub Event                    Host Process                     Worker Container
+─────────────                   ────────────                     ────────────────
+Issue opened ──webhook──→ Parse & deduplicate
+                          Decision engine: analyze_issue
+                          Store activity (pending)
+                                    │
+                          Dispatch loop picks it up
+                          Acquire repo lock + semaphore
+                                    │
+                          Build skill prompt ──────────→ Clone repo
+                                                        Run Claude Agent SDK
+                                                        Reproduce bug
+                                                        ← JSONL logs stream back
+                          Store logs + cost              Post analysis comment
+                                                        "Reply /approve to proceed"
+
+User replies /approve     Approval loop detects it
+                          Create fix_issue activity
+                                    │
+                          Dispatch ────────────────────→ Reproduce (Layer 1 evidence)
+                                                        Write fix
+                                                        Verify (Layer 2 evidence)
+                                                        Run full test suite
+                                                        Commit + open PR
+                                                        ← Result with cost_usd
+                          Mark activity done
+```
+
+### Dual-Mode Operation
+
+CatoCode auto-detects its operating mode at startup:
+
+| | CLI Mode | SaaS Mode |
+|---|---|---|
+| **Detection** | Default | `GITHUB_OAUTH_CLIENT_ID` + `SESSION_SECRET_KEY` set |
+| **Auth** | Personal access token | GitHub App + OAuth 2.0 |
+| **Containers** | Shared worker | Per-user isolated workers |
+| **Data scope** | Global | User-scoped (ownership checks on all endpoints) |
+| **Frontend** | Optional dashboard | Full dashboard with auth |
+| **Commands** | `watch`, `daemon`, `fix` | `server` (unified) |
+
+### Key Engineering Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Per-repo serial lock + global semaphore** | Prevents concurrent modifications to the same repo while allowing parallel work across repos |
+| **Dual-layer timeout** (10min idle + 2hr hard) | Idle timeout catches stuck agents early; hard timeout prevents runaway cost |
+| **3x retry with repo reset** | Transient failures (network, API rate limits) recover automatically; repo reset ensures clean state per attempt |
+| **Session resume** | `respond_review` keeps the PR branch intact (no reset) and resumes the prior Claude session for context continuity |
+| **Markdown skill templates** | Decouples agent behavior from application code; non-engineers can modify agent capabilities |
+| **Two-stage RAG dedup** | Vector embedding recall (fast, cheap) → LLM judgment (accurate, focused); keyword overlap fallback when embedding service is down |
+| **Fernet-encrypted token storage** | GitHub access tokens encrypted at rest with PBKDF2-SHA256 derived key (100K iterations) |
+| **HMAC-SHA256 with constant-time compare** | Webhook signature verification immune to timing attacks |
+| **Dual DB backend** (SQLite / PostgreSQL) | Single-user deploys get zero-config SQLite; production SaaS scales to PostgreSQL — same Python API, placeholder rewriting at the abstraction layer |
+
+---
+
+## Skills
+
+Skills are Markdown prompt templates in `src/catocode/container/skills/`. Edit them directly — no code changes needed.
+
+| Skill | Trigger | Behavior |
+|-------|---------|----------|
+| `analyze_issue` | Issue opened | Pull code, reproduce, analyze root cause, check for duplicates via RAG, post comment, wait for `/approve` |
+| `fix_issue` | After `/approve` | Reproduce (Layer 1) → fix → verify (Layer 2) → open PR with before/after evidence table |
+| `review_pr` | PR opened | Review code quality, security, test coverage, post structured review |
+| `respond_review` | PR review comment | Resume session, address feedback, push new commits (never force-push) |
+| `triage` | Issue opened | Classify (bug/feature/question/duplicate), attempt quick reproduction, apply labels |
+| `patrol` | Scheduled | Proactively scan changed files for security/bugs, file issues with evidence, respect rolling-window budget |
+
+### Proof of Work Protocol
+
+The `fix_issue` skill enforces a two-layer evidence protocol:
+
+**Layer 1 — Reproduction evidence (before fixing)**
+
+```bash
+# Prove the bug exists before touching any code
+pytest tests/test_foo.py::test_bar 2>&1 | tee /tmp/evidence-before.txt
+```
+
+If the bug cannot be reproduced, no fix is attempted — CatoCode comments on the issue explaining why.
+
+**Layer 2 — Verification evidence (after fixing)**
+
+```bash
+# Prove the fix works with the same reproduction steps
+pytest tests/test_foo.py::test_bar 2>&1 | tee /tmp/evidence-after.txt
+# Prove no regressions across the full test suite
+pytest 2>&1 | tee /tmp/test-suite-after.txt
+```
+
+Every PR includes a before/after comparison table. Verify in 30 seconds without running tests locally.
+
+### Human-in-the-Loop Approval
+
+CatoCode never merges code autonomously. The approval flow ensures human oversight at the critical decision point:
+
+```
+Issue opened → analyze_issue (autonomous)
+                    ↓
+            Posts analysis + proposed fix
+            "Reply /approve to proceed"
+                    ↓
+            Human reviews, replies /approve
+                    ↓
+            fix_issue (autonomous)
+                    ↓
+            Opens PR with evidence → Human merges
+```
+
+### Issue Deduplication (RAG Pipeline)
+
+Before filing a new issue (patrol) or analyzing one (analyze_issue), CatoCode checks for duplicates:
+
+1. **Stage 1 — Vector recall**: Generate embedding for the new issue, cosine-similarity search against indexed open issues (top-5 candidates)
+2. **Stage 2 — LLM judgment**: Claude Haiku classifies each candidate as `duplicate`, `related`, or `unrelated`
+3. **Fallback**: If embedding service is unavailable, keyword overlap coefficient (`|A∩B| / min(|A|, |B|)`) provides degraded but functional matching
+
+---
+
 ## Deployment
 
 Docker Compose is the recommended approach — no local Python or uv required.
@@ -125,8 +308,8 @@ Edit `.env`:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | ✅ | Anthropic API key |
-| `GITHUB_TOKEN` | ✅ | GitHub PAT with `repo` scope |
+| `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
+| `GITHUB_TOKEN` | Yes | GitHub PAT with `repo` scope |
 | `PORT` | | Service port (default: `8000`) |
 | `GIT_USER_NAME` | | Commit author name (default: `CatoCode`) |
 | `GIT_USER_EMAIL` | | Commit author email (default: `catocode@bot.local`) |
@@ -142,7 +325,7 @@ Full variable list: [`.env.example`](.env.example)
 docker compose up -d
 ```
 
-First run builds Docker images (~5–10 min). Subsequent starts use the cache. The service runs continuously and processes events automatically.
+First run builds Docker images (~5-10 min). Subsequent starts use the cache. The service runs continuously and processes events automatically.
 
 ### 3. Watch a Repo
 
@@ -150,11 +333,13 @@ First run builds Docker images (~5–10 min). Subsequent starts use the cache. T
 docker compose exec catocode catocode watch https://github.com/owner/repo
 ```
 
-Multiple repos are supported — each is managed independently.
+Multiple repos are supported — each is managed independently with per-repo serial execution.
 
 ### 4. Dashboard
 
 The dashboard starts automatically with `docker compose up -d`. Open [http://localhost:3000](http://localhost:3000).
+
+Features: real-time activity feed (5s polling), live log streaming (SSE), patrol configuration, cost tracking.
 
 > To point at a remote backend, set `NEXT_PUBLIC_API_URL=http://your-server:8000` in `.env`, then run `docker compose up -d --build frontend`.
 
@@ -178,94 +363,6 @@ In GitHub repo **Settings → Webhooks**, add:
 
 ---
 
-## Design
-
-**Best harness, best model.** CatoCode uses the Claude Agent SDK to drive Claude Code CLI inside a container with a full dev toolchain (git, gh, python, node, uv). The agent reads code, writes code, runs tests, commits, and opens PRs — the same workflow as a real developer, not a thin API wrapper.
-
-**Security first, system-level isolation.** Every task runs in an isolated Docker container — resource-limited, no host filesystem access, destroyed after execution. Isolation is an architectural assumption, not a configuration option.
-
-**Skills over features.** CatoCode has no feature flags — only Skills. Each capability is a standalone Markdown prompt template in `skills/`. Want to add a new capability? Write a `SKILL.md` — no Python changes required. The system scales by adding Skills, not by accumulating features.
-
-**Proof of Work.** CatoCode doesn't accept "I fixed it." Every fix requires: failure evidence before + passing evidence after + full test suite with no regressions. The PR description contains a verifiable before/after table. You can decide in 30 seconds whether to merge.
-
-> Design philosophy follows [nanoclaw](https://github.com/qwibitai/nanoclaw).
-
----
-
-## How It Works
-
-CatoCode runs continuously, listening for GitHub events and dispatching Claude agents in isolated containers.
-
-```
-┌─ Host Process ──────────────────────────────────────┐
-│  Daemon                                              │
-│  ├── Scheduler (approval check, patrol, dispatch)   │
-│  ├── Webhook Server (/webhook/github/{repo_id})      │
-│  └── Store (SQLite at /data/catocode.db)             │
-└──────────────────┬──────────────────────────────────┘
-                   │ Docker API
-┌─ Worker Container ──────────────────────────────────┐
-│  catocode-worker                                    │
-│  ├── Claude Agent SDK + Claude Code CLI             │
-│  ├── Dev tools (git, gh, python, node, uv)          │
-│  └── /repos/{owner-repo}/ (cloned repos)            │
-└─────────────────────────────────────────────────────┘
-```
-
-**Event flow:**
-
-1. GitHub issue opens → webhook fires (or patrol scan triggers)
-2. Decision engine classifies the event, selects a skill
-3. Worker container pulls latest code, runs Claude Agent
-4. Agent reproduces the issue, posts analysis comment, waits for `/approve`
-5. `/approve` received → fix → run tests → open PR with Proof of Work evidence
-
-<details>
-<summary><b>Skills reference</b> — triggers and behavior for each skill</summary>
-
-Skills are Markdown prompt templates in `src/catocode/container/skills/`. Edit them directly — no code changes needed.
-
-| Skill | Trigger | Behavior |
-|-------|---------|----------|
-| `analyze_issue` | Issue opened | Pull code, reproduce, analyze root cause, post comment, wait for `/approve` |
-| `fix_issue` | After `/approve` | Reproduce → fix → verify → open PR with Proof of Work table |
-| `review_pr` | PR opened | Review code quality, security, test coverage, post review comments |
-| `respond_review` | PR review comment | Address review feedback, push updates |
-| `triage` | Issue opened | Classify and label, check for duplicates |
-| `patrol` | Scheduled | Proactively scan the codebase for bugs and security issues (budget-limited) |
-
-</details>
-
-<details>
-<summary><b>Proof of Work protocol</b> — why every fix is trustworthy</summary>
-
-The `fix_issue` skill enforces a two-layer evidence protocol:
-
-**Layer 1 — Reproduction evidence (required)**
-
-Before fixing, prove the bug exists:
-
-```bash
-pytest tests/test_foo.py::test_bar 2>&1 | tee /tmp/evidence-before.txt
-```
-
-If the bug cannot be reproduced, no fix is attempted — a comment on the issue explains why.
-
-**Layer 2 — Verification evidence (required)**
-
-After fixing, verify with the same steps:
-
-```bash
-pytest tests/test_foo.py::test_bar 2>&1 | tee /tmp/evidence-after.txt
-pytest 2>&1 | tee /tmp/test-suite-after.txt  # Full suite — confirm no regressions
-```
-
-The PR description includes a complete before/after comparison table. Verify in 30 seconds without running tests locally.
-
-</details>
-
----
-
 ## CLI Reference
 
 ```bash
@@ -275,15 +372,21 @@ catocode watch https://github.com/owner/repo
 # Stop watching
 catocode unwatch https://github.com/owner/repo
 
-# Fix an issue immediately (blocking, no webhook needed)
+# Fix an issue immediately (blocking, streams logs in real time)
 catocode fix https://github.com/owner/repo/issues/42
 
 # View watched repos and recent activity
 catocode status
 
-# View activity logs
+# View activity logs (supports 8-char short ID)
 catocode logs <activity_id>
 catocode logs <activity_id> --follow   # Stream in real time
+
+# SaaS mode: unified server with OAuth + API + webhooks
+catocode server --port 8000
+
+# CLI mode: scheduler + optional webhook server
+catocode daemon --webhook-port 8080
 ```
 
 > **With Docker Compose:** prefix commands with `docker compose exec catocode`.
@@ -291,15 +394,60 @@ catocode logs <activity_id> --follow   # Stream in real time
 
 ---
 
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Agent runtime | Claude Agent SDK, Claude Code CLI |
+| Backend | Python 3.12, FastAPI, asyncio, uvicorn |
+| Container orchestration | Docker SDK (Python), per-user named volumes |
+| Database | SQLite (dev) / PostgreSQL (prod), dual-backend abstraction |
+| Authentication | GitHub App (JWT + installation tokens), OAuth 2.0, Fernet encryption |
+| Frontend | Next.js 15, React 19, TypeScript, Tailwind CSS 4 |
+| Embeddings | OpenAI-compatible API, cosine similarity (pure Python) |
+| Package management | uv (Python), bun (JS/TS) |
+
+---
+
 ## Development
 
 ```bash
-uv sync --dev                              # Install dependencies
-uv run pytest                             # Run tests
+uv sync --dev                            # Install dependencies
+uv run pytest                            # Run unit tests
 uv run pytest --cov=src/catocode         # With coverage
 uv run pytest -m integration             # Integration tests (requires Docker)
-uv run ruff check src/ --fix             # Lint
-cd frontend && bun install && bun dev    # Frontend
+uv run pytest -m e2e                     # End-to-end (requires Docker + GITHUB_TOKEN)
+uv run ruff check src/ --fix             # Lint + auto-fix
+cd frontend && bun install && bun dev    # Frontend dev server
+```
+
+### Project Structure
+
+```
+src/catocode/
+├── cli.py                 # Entry point — 7 subcommands
+├── scheduler.py           # 3 async loops, concurrency control
+├── dispatcher.py          # Activity execution pipeline, timeouts, retries
+├── skill_renderer.py      # Markdown template → prompt builder
+├── store.py               # 12 tables, 55+ data methods
+├── db.py                  # SQLite/PostgreSQL dual-backend abstraction
+├── auth/                  # GitHub App + PAT factory pattern
+├── api/                   # FastAPI routes, OAuth, session management
+├── webhook/               # Event ingestion, HMAC verification, dedup
+├── decision/              # Event → skill routing, admin permission checks
+├── container/             # Docker lifecycle, SDK runner, skill templates
+│   ├── manager.py         # Container 4-state machine
+│   ├── scripts/           # run_activity.py (executes inside container)
+│   └── skills/            # 6 Markdown skill templates
+├── github/                # Issue fetcher, commenter, poller, permissions
+├── templates/             # Prompt generators, agent identity rules
+├── embeddings.py          # Embedding generation + summarization
+└── issue_indexer.py       # RAG indexing + two-stage deduplication
+
+frontend/                  # Next.js 15 dashboard
+├── src/app/               # Pages (landing, dashboard, activity detail)
+├── src/components/        # UI (live dashboard, log viewer, patrol panel)
+└── src/lib/               # API client, TypeScript types
 ```
 
 ---
@@ -322,6 +470,6 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 <div align="center">
 
-[Hosted Service →](https://www.catocode.com) · [Quick Start](#-quick-start) · [CLI Reference](#-cli-reference) · [Contributing](#-contributing)
+[Hosted Service](https://www.catocode.com) · [Quick Start](#quick-start) · [Architecture](#architecture) · [CLI Reference](#cli-reference) · [Contributing](#contributing)
 
 </div>
