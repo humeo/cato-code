@@ -1,6 +1,8 @@
 services:
   catocode:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     restart: unless-stopped
     ports:
       - "${PORT:-8000}:8000"
@@ -41,7 +43,7 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.frontend
+      dockerfile: docker/Dockerfile.frontend
       args:
         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     restart: unless-stopped
