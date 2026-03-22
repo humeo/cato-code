@@ -116,3 +116,47 @@ def test_code_definition_dataclass():
         children=[],
     )
     assert d.file_path == "a.py"
+
+
+from unittest.mock import MagicMock
+from catocode.code_indexer import index_repository
+
+
+def test_index_repository(tmp_path):
+    """Test indexing a directory of source files."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "main.py").write_text(
+        "def hello():\n    return 'world'\n\nclass App:\n    def run(self):\n        pass\n"
+    )
+    (src / "utils.js").write_text(
+        "function add(a, b) { return a + b; }\n"
+    )
+    (src / "readme.md").write_text("# Not code")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "dep.js").write_text("function x() {}")
+
+    store = MagicMock()
+    store.get_code_index_state.return_value = None
+
+    stats = index_repository("test-repo", str(tmp_path), store)
+
+    assert stats["files_parsed"] == 2
+    assert stats["definitions_found"] >= 3  # hello, App, App.run, add
+    assert store.upsert_code_definition.call_count >= 3
+    assert store.update_code_index_state.call_count == 1
+
+
+def test_index_repository_skips_if_same_commit(tmp_path):
+    """Skip re-indexing if commit hasn't changed."""
+    (tmp_path / "main.py").write_text("def foo(): pass")
+
+    store = MagicMock()
+    store.get_code_index_state.return_value = {
+        "last_indexed_commit": "abc123",
+    }
+
+    stats = index_repository("test-repo", str(tmp_path), store, current_commit="abc123")
+    assert stats["skipped"] is True
+    assert store.upsert_code_definition.call_count == 0

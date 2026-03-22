@@ -5,8 +5,11 @@ using tree-sitter grammars for Python, JavaScript, TypeScript, Go, and Rust.
 """
 from __future__ import annotations
 
+import json as _json
 import logging
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -481,3 +484,85 @@ def parse_file(
         return []
 
     return extractor(tree.root_node, source_bytes, file_path)
+
+
+# ---------------------------------------------------------------------------
+# Repository indexer
+# ---------------------------------------------------------------------------
+
+SKIP_DIRS = {
+    ".git", "node_modules", "__pycache__", ".venv", "venv",
+    ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
+    ".next", ".nuxt", "vendor", "target",
+}
+
+MAX_FILE_SIZE = 500_000  # 500KB
+
+
+def index_repository(
+    repo_id: str,
+    repo_path: str,
+    store,
+    current_commit: str | None = None,
+) -> dict:
+    """Walk a repository, parse all supported files, store definitions."""
+    if current_commit:
+        state = store.get_code_index_state(repo_id)
+        if state and state.get("last_indexed_commit") == current_commit:
+            logger.debug("Repo %s unchanged at %s, skipping index", repo_id, current_commit[:8])
+            return {"skipped": True, "files_parsed": 0, "definitions_found": 0}
+
+    # Clear stale definitions before full re-index
+    store.clear_code_definitions(repo_id)
+
+    files_parsed = 0
+    definitions_found = 0
+    root = Path(repo_path)
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+
+        for filename in filenames:
+            file_path = Path(dirpath) / filename
+            language = detect_language(filename)
+            if language is None:
+                continue
+
+            try:
+                size = file_path.stat().st_size
+                if size > MAX_FILE_SIZE:
+                    continue
+            except OSError:
+                continue
+
+            try:
+                source = file_path.read_text(errors="replace")
+            except OSError:
+                continue
+
+            rel_path = str(file_path.relative_to(root))
+            defs = parse_file(rel_path, source, language)
+
+            for d in defs:
+                store.upsert_code_definition(
+                    repo_id=repo_id,
+                    file_path=d.file_path,
+                    symbol_type=d.symbol_type,
+                    symbol_name=d.symbol_name,
+                    signature=d.signature,
+                    body_preview=d.body_preview,
+                    line_start=d.line_start,
+                    line_end=d.line_end,
+                    language=d.language,
+                    children=_json.dumps(d.children) if d.children else None,
+                )
+                definitions_found += 1
+
+            files_parsed += 1
+
+    store.update_code_index_state(
+        repo_id, commit_sha=current_commit or "", file_count=files_parsed, symbol_count=definitions_found
+    )
+
+    logger.info("Indexed %s: %d files, %d definitions", repo_id, files_parsed, definitions_found)
+    return {"skipped": False, "files_parsed": files_parsed, "definitions_found": definitions_found}
