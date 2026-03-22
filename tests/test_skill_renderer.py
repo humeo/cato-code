@@ -179,7 +179,8 @@ def test_build_fix_issue_prompt_without_code_context():
         repo_id="owner-repo",
         issue_data="Some bug",
     )
-    assert "Pre-loaded Code Context" not in prompt
+    # "validate_token" is injected content — should NOT appear without code_context
+    assert "validate_token" not in prompt
     assert "## Current Task" in prompt
 
 

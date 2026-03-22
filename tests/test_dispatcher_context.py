@@ -54,5 +54,5 @@ async def test_build_prompt_works_without_code_context():
 
         prompt = await _build_prompt(activity, repo, "fake-token")
 
-    assert "Pre-loaded Code Context" not in prompt
+    assert "test context" not in prompt  # No injected context content
     assert "## Current Task" in prompt
