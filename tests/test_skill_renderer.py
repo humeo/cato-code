@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from catocode.skill_renderer import (
+    build_analyze_issue_prompt,
     build_fix_issue_prompt,
     build_patrol_prompt,
     build_respond_review_prompt,
@@ -147,3 +148,47 @@ def test_build_respond_review_prompt():
     assert "PR #789" in prompt
     assert "repository owner-repo" in prompt
     assert "Please add null check" in prompt
+
+
+def test_build_fix_issue_prompt_with_code_context():
+    code_context = """## Pre-loaded Code Context
+
+### `src/auth.py`
+
+**function `validate_token`** (lines 10-20)
+```
+def validate_token(token: str) -> bool
+```
+"""
+    prompt = build_fix_issue_prompt(
+        issue_number="42",
+        repo_id="owner-repo",
+        issue_data="Token validation fails on empty input",
+        code_context=code_context,
+    )
+    assert "Pre-loaded Code Context" in prompt
+    assert "validate_token" in prompt
+    assert "src/auth.py" in prompt
+    assert "## Current Task" in prompt
+    assert "#42" in prompt
+
+
+def test_build_fix_issue_prompt_without_code_context():
+    prompt = build_fix_issue_prompt(
+        issue_number="42",
+        repo_id="owner-repo",
+        issue_data="Some bug",
+    )
+    assert "Pre-loaded Code Context" not in prompt
+    assert "## Current Task" in prompt
+
+
+def test_build_analyze_issue_prompt_with_code_context():
+    code_context = "## Pre-loaded Code Context\n\nSome code here"
+    prompt = build_analyze_issue_prompt(
+        issue_number="42",
+        repo_id="owner-repo",
+        issue_data="Some issue",
+        code_context=code_context,
+    )
+    assert "Pre-loaded Code Context" in prompt
