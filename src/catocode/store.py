@@ -135,6 +135,34 @@ CREATE TABLE IF NOT EXISTS patrol_reviewed_files (
     reviewed_at TEXT NOT NULL,
     UNIQUE(repo_id, file_path)
 );
+
+CREATE TABLE IF NOT EXISTS code_definitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    symbol_type TEXT NOT NULL,
+    symbol_name TEXT NOT NULL,
+    signature TEXT,
+    body_preview TEXT,
+    children TEXT,
+    line_start INTEGER,
+    line_end INTEGER,
+    language TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(repo_id, file_path, symbol_name, symbol_type)
+);
+
+CREATE TABLE IF NOT EXISTS code_index_state (
+    repo_id TEXT PRIMARY KEY,
+    last_indexed_commit TEXT,
+    last_indexed_at TEXT,
+    file_count INTEGER DEFAULT 0,
+    symbol_count INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_defs_repo_name ON code_definitions(repo_id, symbol_name);
+CREATE INDEX IF NOT EXISTS idx_code_defs_repo_file ON code_definitions(repo_id, file_path);
 """
 
 # Migrations: columns added after initial schema
@@ -847,5 +875,101 @@ class Store:
         """Record the HEAD SHA of the last patrol run."""
         self._db.execute(
             "UPDATE repos SET last_patrol_sha = ? WHERE id = ?", (sha, repo_id)
+        )
+        self._db.commit()
+
+    # --- code definitions ---
+
+    def upsert_code_definition(
+        self,
+        repo_id: str,
+        file_path: str,
+        symbol_type: str,
+        symbol_name: str,
+        signature: str,
+        body_preview: str,
+        line_start: int,
+        line_end: int,
+        language: str,
+        children: str | None = None,
+    ) -> None:
+        now = _now()
+        self._db.execute(
+            """INSERT INTO code_definitions
+               (repo_id, file_path, symbol_type, symbol_name, signature,
+                body_preview, children, line_start, line_end, language, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(repo_id, file_path, symbol_name, symbol_type) DO UPDATE SET
+                 signature = excluded.signature,
+                 body_preview = excluded.body_preview,
+                 children = excluded.children,
+                 line_start = excluded.line_start,
+                 line_end = excluded.line_end,
+                 updated_at = excluded.updated_at""",
+            (repo_id, file_path, symbol_type, symbol_name, signature,
+             body_preview, children, line_start, line_end, language, now, now),
+        )
+        self._db.commit()
+
+    def get_code_definitions(self, repo_id: str, file_path: str | None = None) -> list[dict]:
+        if file_path:
+            return self._db.execute(
+                "SELECT * FROM code_definitions WHERE repo_id = ? AND file_path = ? ORDER BY line_start",
+                (repo_id, file_path),
+            )
+        return self._db.execute(
+            "SELECT * FROM code_definitions WHERE repo_id = ? ORDER BY file_path, line_start",
+            (repo_id,),
+        )
+
+    def search_code_definitions(
+        self,
+        repo_id: str,
+        name_pattern: str | None = None,
+        file_pattern: str | None = None,
+    ) -> list[dict]:
+        conditions = ["repo_id = ?"]
+        params: list = [repo_id]
+        if name_pattern:
+            conditions.append("symbol_name LIKE ?")
+            params.append(f"%{name_pattern}%")
+        if file_pattern:
+            conditions.append("file_path LIKE ?")
+            params.append(f"%{file_pattern}%")
+        where = " AND ".join(conditions)
+        return self._db.execute(
+            f"SELECT * FROM code_definitions WHERE {where} ORDER BY file_path, line_start",
+            tuple(params),
+        )
+
+    def clear_code_definitions(self, repo_id: str) -> None:
+        self._db.execute("DELETE FROM code_definitions WHERE repo_id = ?", (repo_id,))
+        self._db.commit()
+
+    # --- code index state ---
+
+    def get_code_index_state(self, repo_id: str) -> dict | None:
+        return self._db.execute_one(
+            "SELECT * FROM code_index_state WHERE repo_id = ?", (repo_id,)
+        )
+
+    def update_code_index_state(
+        self,
+        repo_id: str,
+        commit_sha: str,
+        file_count: int,
+        symbol_count: int,
+    ) -> None:
+        now = _now()
+        self._db.execute(
+            """INSERT INTO code_index_state
+               (repo_id, last_indexed_commit, last_indexed_at, file_count, symbol_count)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(repo_id) DO UPDATE SET
+                 last_indexed_commit = excluded.last_indexed_commit,
+                 last_indexed_at = excluded.last_indexed_at,
+                 file_count = excluded.file_count,
+                 symbol_count = excluded.symbol_count""",
+            (repo_id, commit_sha, now, file_count, symbol_count),
         )
         self._db.commit()
