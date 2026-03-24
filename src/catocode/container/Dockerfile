@@ -29,10 +29,13 @@ RUN npm install -g @anthropic-ai/claude-code@latest
 # Layer 5: Claude Agent SDK (installed system-wide)
 RUN pip3 install --break-system-packages claude-agent-sdk
 
-# Layer 6: Playwright Python package (browser installed on demand, not at build time)
+# Layer 6: Vendored Codebase Graph source
+COPY vendor/codebase-graph/ /tmp/codebase-graph/
+
+# Layer 7: Playwright Python package (browser installed on demand, not at build time)
 RUN pip3 install --break-system-packages playwright
 
-# Layer 7: git credential helper + global git config
+# Layer 8: git credential helper + global git config
 # Note: user.name and user.email are set at runtime via _configure_git_identity()
 RUN printf '#!/bin/bash\necho "protocol=https"\necho "host=github.com"\necho "username=x-access-token"\necho "password=${GITHUB_TOKEN}"\n' \
       > /usr/local/bin/git-credential-catocode \
@@ -40,24 +43,30 @@ RUN printf '#!/bin/bash\necho "protocol=https"\necho "host=github.com"\necho "us
     && git config --global credential.helper catocode \
     && git config --global --add safe.directory '*'
 
-# Layer 8: Create non-root user for Claude Code
+# Layer 9: Create non-root user for Claude Code
 RUN useradd -m -s /bin/bash catocode && \
-    mkdir -p /repos /output /app && \
-    chown -R catocode:catocode /repos /output /app
+    mkdir -p /repos /output /app /home/catocode/.catocode /home/catocode/.local/bin && \
+    chown -R catocode:catocode /repos /output /app /home/catocode/.catocode /home/catocode/.local
 
-# Layer 9: Copy SDK runner script
+# Layer 10: Install Codebase Graph CLI for the non-root user
+RUN HOME=/home/catocode uv python install 3.12 \
+    && HOME=/home/catocode uv tool install --force --python 3.12 /tmp/codebase-graph \
+    && chown -R catocode:catocode /home/catocode/.local \
+    && rm -rf /tmp/codebase-graph
+
+# Layer 11: Copy SDK runner script
 COPY scripts/run_activity.py /app/run_activity.py
 RUN chown catocode:catocode /app/run_activity.py
 
-# Layer 10: Copy RepoCraft skills to container
+# Layer 12: Copy RepoCraft skills to container
 COPY skills/ /home/catocode/.claude/skills/
-RUN chown -R catocode:catocode /home/catocode/.claude
+RUN chown -R catocode:catocode /home/catocode/.claude /home/catocode/.catocode
 
 USER catocode
 WORKDIR /home/catocode
 
 # Ensure uv is available for non-root user
-ENV PATH="/root/.local/bin:/home/catocode/.local/bin:$PATH"
+ENV PATH="/home/catocode/.local/bin:/root/.local/bin:$PATH"
 
 # Clear proxy for runtime
 ENV http_proxy="" https_proxy="" all_proxy=""

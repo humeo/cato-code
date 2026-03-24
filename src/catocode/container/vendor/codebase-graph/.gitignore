@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.worktrees/
+*.egg-info/
+dist/
+.codebase-graph/
