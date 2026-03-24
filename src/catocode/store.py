@@ -354,12 +354,12 @@ class Store:
                (activity_id, step_key, status, started_at, finished_at, duration_ms, reason, metadata)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(activity_id, step_key) DO UPDATE SET
-                 status = excluded.status,
-                 started_at = excluded.started_at,
-                 finished_at = excluded.finished_at,
-                 duration_ms = excluded.duration_ms,
-                 reason = excluded.reason,
-                 metadata = excluded.metadata""",
+                 status = COALESCE(excluded.status, activity_steps.status),
+                 started_at = COALESCE(excluded.started_at, activity_steps.started_at),
+                 finished_at = COALESCE(excluded.finished_at, activity_steps.finished_at),
+                 duration_ms = COALESCE(excluded.duration_ms, activity_steps.duration_ms),
+                 reason = COALESCE(excluded.reason, activity_steps.reason),
+                 metadata = COALESCE(excluded.metadata, activity_steps.metadata)""",
             (
                 activity_id,
                 step_key,
