@@ -47,6 +47,32 @@ class SuccessfulSetupContainerManager:
         self.calls.append(("reset_repo", repo_id))
 
 
+class ClaudeMdPresentWithoutSetupContainerManager:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None]] = []
+
+    def ensure_running(self, anthropic_api_key: str, github_token: str, anthropic_base_url: str | None = None) -> None:
+        self.calls.append(("ensure_running", anthropic_base_url))
+
+    def ensure_repo(self, repo_id: str, repo_url: str) -> None:
+        self.calls.append(("ensure_repo", repo_id))
+
+    def exec(self, command: str, workdir: str = "/repos") -> FakeExecResult:
+        self.calls.append((command, workdir))
+        if command == "test -f CLAUDE.md":
+            return FakeExecResult(exit_code=0)
+        if command.startswith("cg index"):
+            return FakeExecResult(exit_code=0, stdout="Indexed /repos/owner-repo\n")
+        if "cg stats" in command:
+            return FakeExecResult(exit_code=0, stdout="Files: 12\nSymbols: 34\n")
+        if command == "git rev-parse HEAD":
+            return FakeExecResult(exit_code=0, stdout="abc123\n")
+        raise AssertionError(f"Unexpected command: {command}")
+
+    def reset_repo(self, repo_id: str) -> None:
+        self.calls.append(("reset_repo", repo_id))
+
+
 class FailingSetupContainerManager:
     def __init__(self) -> None:
         self.ensure_repo_attempts = 0
@@ -210,6 +236,37 @@ async def test_watch_ready_repo_is_idempotent(store, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_watch_requeues_stale_setting_up_repo(store, monkeypatch):
+    from catocode import cli
+
+    store.add_repo("owner-repo", "https://github.com/owner/repo")
+    store.update_repo("owner-repo", watch=1)
+    store.update_repo_lifecycle("owner-repo", lifecycle_status="setting_up")
+
+    monkeypatch.setattr(cli, "Store", lambda: store)
+    monkeypatch.setattr(cli, "get_auth", lambda: SimpleNamespace(get_token=AsyncMock(return_value="token")))
+    monkeypatch.setattr(cli, "get_patrol_config", lambda: SimpleNamespace(max_issues=5, window_hours=24))
+    monkeypatch.setattr(
+        "catocode.github.permissions.check_repo_write_access",
+        AsyncMock(return_value=(True, "write access confirmed")),
+    )
+
+    exit_code = await cli.cmd_watch(
+        argparse.Namespace(repo_url="https://github.com/owner/repo")
+    )
+
+    assert exit_code == 0
+    activities = store.list_activities(repo_id="owner-repo")
+    assert len(activities) == 1
+    assert activities[0]["kind"] == "setup"
+
+    repo = store.get_repo("owner-repo")
+    assert repo is not None
+    assert repo["lifecycle_status"] == "setting_up"
+    assert repo["last_setup_activity_id"] == activities[0]["id"]
+
+
+@pytest.mark.asyncio
 async def test_setup_marks_repo_ready_after_clone_init_claude_md_cg_index_health_check(
     store,
     monkeypatch,
@@ -360,6 +417,46 @@ async def test_dispatch_reuses_existing_pending_setup_activity(store, monkeypatc
 
     assert executed_activity_ids[0] == queued_setup_id
     assert executed_activity_ids[1] == task_activity_id
+
+
+@pytest.mark.asyncio
+async def test_dispatch_runs_setup_when_claude_md_exists_without_completed_setup(store, monkeypatch):
+    from catocode.dispatcher import dispatch
+
+    repo_id = "owner-repo"
+    store.add_repo(repo_id, "https://github.com/owner/repo")
+    store.update_repo_lifecycle(repo_id, lifecycle_status="error", last_error="Interrupted setup")
+    task_activity_id = store.add_activity(repo_id, "task", "do the thing")
+
+    container_mgr = ClaudeMdPresentWithoutSetupContainerManager()
+    executed_activity_ids: list[str] = []
+
+    async def fake_execute_sdk_runner(**kwargs):
+        executed_activity_ids.append(kwargs["activity_id"])
+        return 0, f"session-{kwargs['activity_id'][:8]}", 0.1
+
+    monkeypatch.setattr("catocode.dispatcher._execute_sdk_runner", fake_execute_sdk_runner)
+    monkeypatch.setattr("catocode.dispatcher._index_repo_from_container", lambda *args, **kwargs: None)
+
+    await dispatch(
+        activity_id=task_activity_id,
+        store=store,
+        container_mgr=container_mgr,
+        anthropic_api_key="anthropic-key",
+        github_token="github-token",
+        verbose=False,
+    )
+
+    activities = store.list_activities(repo_id=repo_id)
+    setup_activities = [activity for activity in activities if activity["kind"] == "setup"]
+    assert len(setup_activities) == 1
+    assert executed_activity_ids[0] == setup_activities[0]["id"]
+    assert executed_activity_ids[1] == task_activity_id
+
+    repo = store.get_repo(repo_id)
+    assert repo is not None
+    assert repo["lifecycle_status"] == "ready"
+    assert repo["last_setup_activity_id"] == setup_activities[0]["id"]
 
 
 @pytest.mark.asyncio

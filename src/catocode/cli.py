@@ -126,8 +126,17 @@ async def cmd_watch(args: argparse.Namespace) -> int:
         return 0
 
     if existing_repo is not None and existing_repo.get("lifecycle_status") == "setting_up":
-        console.print(f"[dim]{repo_id} is already setting up. No duplicate setup queued.[/dim]")
-        return 0
+        active_setup = next(
+            (
+                activity
+                for activity in reversed(store.list_activities(repo_id=repo_id))
+                if activity["kind"] == "setup" and activity["status"] in {"pending", "running"}
+            ),
+            None,
+        )
+        if active_setup is not None:
+            console.print(f"[dim]{repo_id} is already setting up. No duplicate setup queued.[/dim]")
+            return 0
 
     activity_id = store.add_activity(repo_id, "setup", "watch")
     store.update_repo_lifecycle(

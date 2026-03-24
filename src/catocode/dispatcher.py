@@ -249,8 +249,9 @@ async def dispatch(
         # 3. Ensure repo setup is complete before other activity kinds proceed.
         result = container_mgr.exec("test -f CLAUDE.md", workdir=f"/repos/{repo_id}")
         has_claude_md = result.exit_code == 0
-        if has_claude_md and repo.get("lifecycle_status") != "ready":
-            completed_setup = _find_latest_completed_setup_activity(store, repo_id)
+        completed_setup = _find_latest_completed_setup_activity(store, repo_id)
+        setup_complete = has_claude_md and completed_setup is not None
+        if setup_complete and repo.get("lifecycle_status") != "ready":
             store.update_repo_lifecycle(
                 repo_id,
                 lifecycle_status="ready",
@@ -267,7 +268,7 @@ async def dispatch(
                 ),
             )
             repo = store.get_repo(repo_id) or repo
-        needs_setup = not has_claude_md
+        needs_setup = not setup_complete
 
         if needs_setup:
             setup_activity = _find_reusable_setup_activity(store, repo_id, activity_id)
