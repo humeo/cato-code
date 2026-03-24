@@ -63,6 +63,7 @@ frontend/tsconfig.tsbuildinfo
 
 # Codex skills (local dev tools)
 .codex/
+.worktrees/
 
 # Misplaced home directory
 ~/
