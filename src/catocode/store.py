@@ -37,9 +37,13 @@ CREATE TABLE IF NOT EXISTS repos (
     id TEXT PRIMARY KEY,
     repo_url TEXT NOT NULL,
     watch INTEGER DEFAULT 0,
+    lifecycle_status TEXT DEFAULT 'watched',
     last_etag TEXT,
     last_poll_at TEXT,
     patrol_interval_hours INTEGER DEFAULT 12,
+    last_ready_at TEXT,
+    last_error TEXT,
+    last_setup_activity_id TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -54,6 +58,19 @@ CREATE TABLE IF NOT EXISTS activities (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (repo_id) REFERENCES repos(id)
+);
+
+CREATE TABLE IF NOT EXISTS activity_steps (
+    activity_id TEXT NOT NULL,
+    step_key TEXT NOT NULL,
+    status TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    duration_ms INTEGER,
+    reason TEXT,
+    metadata TEXT,
+    PRIMARY KEY (activity_id, step_key),
+    FOREIGN KEY (activity_id) REFERENCES activities(id)
 );
 
 CREATE TABLE IF NOT EXISTS logs (
@@ -168,9 +185,13 @@ CREATE INDEX IF NOT EXISTS idx_code_defs_repo_file ON code_definitions(repo_id, 
 # Migrations: columns added after initial schema
 _MIGRATIONS = [
     "ALTER TABLE repos ADD COLUMN watch INTEGER DEFAULT 0",
+    "ALTER TABLE repos ADD COLUMN lifecycle_status TEXT DEFAULT 'watched'",
     "ALTER TABLE repos ADD COLUMN last_etag TEXT",
     "ALTER TABLE repos ADD COLUMN last_poll_at TEXT",
     "ALTER TABLE repos ADD COLUMN patrol_interval_hours INTEGER DEFAULT 12",
+    "ALTER TABLE repos ADD COLUMN last_ready_at TEXT",
+    "ALTER TABLE repos ADD COLUMN last_error TEXT",
+    "ALTER TABLE repos ADD COLUMN last_setup_activity_id TEXT",
     "ALTER TABLE activities ADD COLUMN requires_approval INTEGER DEFAULT 0",
     "ALTER TABLE activities ADD COLUMN approval_comment_url TEXT",
     "ALTER TABLE activities ADD COLUMN approved_by TEXT",
@@ -183,6 +204,18 @@ _MIGRATIONS = [
     "ALTER TABLE repos ADD COLUMN patrol_window_hours INTEGER DEFAULT 12",
     "ALTER TABLE repos ADD COLUMN last_patrol_sha TEXT",
     "ALTER TABLE activities ADD COLUMN metadata TEXT",
+    """CREATE TABLE IF NOT EXISTS activity_steps (
+    activity_id TEXT NOT NULL,
+    step_key TEXT NOT NULL,
+    status TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    duration_ms INTEGER,
+    reason TEXT,
+    metadata TEXT,
+    PRIMARY KEY (activity_id, step_key),
+    FOREIGN KEY (activity_id) REFERENCES activities(id)
+)""",
 ]
 
 
@@ -250,6 +283,14 @@ class Store:
         self._db.execute(f"UPDATE repos SET {set_clause} WHERE id = ?", values)
         self._db.commit()
 
+    def update_repo_lifecycle(self, repo_id: str, **fields: object) -> None:
+        if not fields:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = tuple(fields.values()) + (repo_id,)
+        self._db.execute(f"UPDATE repos SET {set_clause} WHERE id = ?", values)
+        self._db.commit()
+
     def delete_repo(self, repo_id: str) -> None:
         self._db.execute("DELETE FROM repos WHERE id = ?", (repo_id,))
         self._db.commit()
@@ -292,6 +333,56 @@ class Store:
     def get_running_activities(self) -> list[dict]:
         return self._db.execute(
             "SELECT * FROM activities WHERE status = 'running' ORDER BY created_at"
+        )
+
+    def upsert_activity_step(
+        self,
+        activity_id: str,
+        step_key: str,
+        status: str | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+        duration_ms: int | None = None,
+        reason: str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        import json as _json
+
+        metadata_str = _json.dumps(metadata) if metadata is not None else None
+        self._db.execute(
+            """INSERT INTO activity_steps
+               (activity_id, step_key, status, started_at, finished_at, duration_ms, reason, metadata)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(activity_id, step_key) DO UPDATE SET
+                 status = excluded.status,
+                 started_at = excluded.started_at,
+                 finished_at = excluded.finished_at,
+                 duration_ms = excluded.duration_ms,
+                 reason = excluded.reason,
+                 metadata = excluded.metadata""",
+            (
+                activity_id,
+                step_key,
+                status,
+                started_at,
+                finished_at,
+                duration_ms,
+                reason,
+                metadata_str,
+            ),
+        )
+        self._db.commit()
+
+    def list_activity_steps(self, activity_id: str) -> list[dict]:
+        return self._db.execute(
+            "SELECT * FROM activity_steps WHERE activity_id = ? ORDER BY step_key",
+            (activity_id,),
+        )
+
+    def get_activity_step(self, activity_id: str, step_key: str) -> dict | None:
+        return self._db.execute_one(
+            "SELECT * FROM activity_steps WHERE activity_id = ? AND step_key = ?",
+            (activity_id, step_key),
         )
 
     def list_activities(self, repo_id: str | None = None, user_id: str | None = None) -> list[dict]:
@@ -952,6 +1043,18 @@ class Store:
         return self._db.execute_one(
             "SELECT * FROM code_index_state WHERE repo_id = ?", (repo_id,)
         )
+
+    def set_codebase_graph_state(
+        self,
+        repo_id: str,
+        commit_sha: str,
+        file_count: int,
+        symbol_count: int,
+    ) -> None:
+        self.update_code_index_state(repo_id, commit_sha, file_count, symbol_count)
+
+    def get_codebase_graph_state(self, repo_id: str) -> dict | None:
+        return self.get_code_index_state(repo_id)
 
     def update_code_index_state(
         self,
