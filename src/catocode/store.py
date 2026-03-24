@@ -257,6 +257,42 @@ class Store:
                     _logger.warning("Migration skipped with unexpected error: %s | SQL: %.120s", e, migration)
         # Rewrite legacy init activities after schema upgrades so runtime only needs setup.
         self._db.execute("UPDATE activities SET kind = 'setup' WHERE kind = 'init'")
+        self._db.execute(
+            """UPDATE repos
+               SET lifecycle_status = 'ready',
+                   last_ready_at = COALESCE(
+                       last_ready_at,
+                       (
+                           SELECT a.updated_at
+                           FROM activities a
+                           WHERE a.repo_id = repos.id
+                             AND a.kind = 'setup'
+                             AND a.status = 'done'
+                           ORDER BY a.updated_at DESC
+                           LIMIT 1
+                       )
+                   ),
+                   last_setup_activity_id = COALESCE(
+                       last_setup_activity_id,
+                       (
+                           SELECT a.id
+                           FROM activities a
+                           WHERE a.repo_id = repos.id
+                             AND a.kind = 'setup'
+                             AND a.status = 'done'
+                           ORDER BY a.updated_at DESC
+                           LIMIT 1
+                       )
+                   )
+               WHERE EXISTS (
+                   SELECT 1
+                   FROM activities a
+                   WHERE a.repo_id = repos.id
+                     AND a.kind = 'setup'
+                     AND a.status = 'done'
+               )
+                 AND lifecycle_status != 'ready'"""
+        )
         self._db.commit()
 
     # --- repos ---
@@ -407,6 +443,10 @@ class Store:
             (activity_id, step_key),
         )
 
+    def delete_activity_steps(self, activity_id: str) -> None:
+        self._db.execute("DELETE FROM activity_steps WHERE activity_id = ?", (activity_id,))
+        self._db.commit()
+
     def list_activities(self, repo_id: str | None = None, user_id: str | None = None) -> list[dict]:
         if repo_id is not None:
             return self._db.execute(
@@ -511,6 +551,9 @@ class Store:
 
     def mark_crashed_activities_failed(self) -> int:
         """On daemon startup, mark any status=running activities as failed (previous crash)."""
+        crashed_setups = self._db.execute(
+            "SELECT id, repo_id FROM activities WHERE status = 'running' AND kind = 'setup'"
+        )
         rows_before = self._db.execute(
             "SELECT COUNT(*) as c FROM activities WHERE status = 'running'"
         )
@@ -521,6 +564,12 @@ class Store:
             "WHERE status = 'running'",
             (_now(),),
         )
+        for activity in crashed_setups:
+            self._db.execute(
+                "UPDATE repos SET lifecycle_status = 'error', last_error = ?, last_setup_activity_id = ? "
+                "WHERE id = ?",
+                ("Interrupted (daemon restarted)", activity["id"], activity["repo_id"]),
+            )
         self._db.commit()
         return count
 

@@ -77,6 +77,8 @@ class ReusableSetupContainerManager:
 
     def exec(self, command: str, workdir: str = "/repos") -> FakeExecResult:
         self.events.append(("exec", command))
+        if command == "test -f CLAUDE.md":
+            return FakeExecResult(exit_code=1)
         if command.startswith("cg index"):
             return FakeExecResult(exit_code=0, stdout="Indexed\n")
         if "cg stats" in command:
@@ -105,6 +107,32 @@ class RetryAfterInitFailureContainerManager:
             return FakeExecResult(exit_code=0, stdout="Indexed\n")
         if "cg stats" in command:
             return FakeExecResult(exit_code=0, stdout="Files: 12\nSymbols: 34\n")
+        raise AssertionError(f"Unexpected command: {command}")
+
+    def reset_repo(self, repo_id: str) -> None:
+        self.events.append(("reset_repo", repo_id))
+
+
+class RetryClearsStaleStepsContainerManager:
+    def __init__(self) -> None:
+        self.ensure_repo_attempts = 0
+        self.events: list[tuple[str, str]] = []
+
+    def ensure_running(self, anthropic_api_key: str, github_token: str, anthropic_base_url: str | None = None) -> None:
+        self.events.append(("ensure_running", anthropic_api_key))
+
+    def ensure_repo(self, repo_id: str, repo_url: str) -> None:
+        self.ensure_repo_attempts += 1
+        self.events.append(("ensure_repo", f"{repo_id}:{self.ensure_repo_attempts}"))
+        if self.ensure_repo_attempts >= 2:
+            raise RuntimeError(f"clone failed on attempt {self.ensure_repo_attempts}")
+
+    def exec(self, command: str, workdir: str = "/repos") -> FakeExecResult:
+        self.events.append(("exec", command))
+        if command.startswith("cg index"):
+            return FakeExecResult(exit_code=0, stdout="Indexed\n")
+        if "cg stats" in command:
+            return FakeExecResult(exit_code=1, stderr="health check failed")
         raise AssertionError(f"Unexpected command: {command}")
 
     def reset_repo(self, repo_id: str) -> None:
@@ -434,3 +462,43 @@ async def test_setup_retry_resets_repo_after_init_failure(store, monkeypatch):
     reset_position = container_mgr.events.index(("reset_repo", repo_id))
     assert len(ensure_repo_positions) == 2
     assert ensure_repo_positions[0] < reset_position < ensure_repo_positions[1]
+
+
+@pytest.mark.asyncio
+async def test_setup_retry_clears_stale_steps_between_attempts(store, monkeypatch):
+    from catocode.dispatcher import dispatch
+
+    repo_id = "owner-repo"
+    store.add_repo(repo_id, "https://github.com/owner/repo")
+    activity_id = store.add_activity(repo_id, "setup", "watch")
+
+    container_mgr = RetryClearsStaleStepsContainerManager()
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    async def fake_execute_sdk_runner(**kwargs):
+        return 0, "session-123", 0.42
+
+    monkeypatch.setattr("catocode.dispatcher.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("catocode.dispatcher._execute_sdk_runner", fake_execute_sdk_runner)
+
+    await dispatch(
+        activity_id=activity_id,
+        store=store,
+        container_mgr=container_mgr,
+        anthropic_api_key="anthropic-key",
+        github_token="github-token",
+        verbose=False,
+    )
+
+    activity = store.get_activity(activity_id)
+    steps = store.list_activity_steps(activity_id)
+
+    assert activity is not None
+    assert activity["status"] == "failed"
+    assert sleep_calls == [30, 30]
+    assert [step["step_key"] for step in steps] == ["clone"]
+    assert steps[0]["status"] == "failed"
+    assert "clone failed on attempt 3" in (steps[0]["reason"] or "")

@@ -104,6 +104,16 @@ def _find_reusable_setup_activity(
     return None
 
 
+def _find_latest_completed_setup_activity(store: "Store", repo_id: str) -> dict | None:
+    for candidate in reversed(store.list_activities(repo_id=repo_id)):
+        if candidate["kind"] != "setup":
+            continue
+        if candidate["status"] != "done":
+            continue
+        return candidate
+    return None
+
+
 async def _wait_for_activity_completion(
     store: "Store",
     activity_id: str,
@@ -237,10 +247,27 @@ async def dispatch(
         container_mgr.ensure_repo(repo_id, repo_url)
 
         # 3. Ensure repo setup is complete before other activity kinds proceed.
-        needs_setup = repo.get("lifecycle_status") != "ready"
-        if not needs_setup:
-            result = container_mgr.exec("test -f CLAUDE.md", workdir=f"/repos/{repo_id}")
-            needs_setup = result.exit_code != 0
+        result = container_mgr.exec("test -f CLAUDE.md", workdir=f"/repos/{repo_id}")
+        has_claude_md = result.exit_code == 0
+        if has_claude_md and repo.get("lifecycle_status") != "ready":
+            completed_setup = _find_latest_completed_setup_activity(store, repo_id)
+            store.update_repo_lifecycle(
+                repo_id,
+                lifecycle_status="ready",
+                last_ready_at=(
+                    completed_setup["updated_at"]
+                    if completed_setup is not None
+                    else repo.get("last_ready_at") or _now_iso()
+                ),
+                last_error=None,
+                last_setup_activity_id=(
+                    completed_setup["id"]
+                    if completed_setup is not None
+                    else repo.get("last_setup_activity_id")
+                ),
+            )
+            repo = store.get_repo(repo_id) or repo
+        needs_setup = not has_claude_md
 
         if needs_setup:
             setup_activity = _find_reusable_setup_activity(store, repo_id, activity_id)
@@ -467,6 +494,9 @@ async def _run_setup(
         current_step_started_at: str | None = None
 
         try:
+            if attempt > 1:
+                store.delete_activity_steps(activity_id)
+
             current_step = "clone"
             current_step_started_at = _start_activity_step(
                 store,
@@ -541,19 +571,19 @@ async def _run_setup(
             )
 
             summary = _extract_summary(store.get_logs(activity_id))
-            store.update_activity(
-                activity_id,
-                status="done",
-                summary=summary,
-                session_id=last_session_id,
-                cost_usd=last_cost_usd,
-            )
             store.update_repo_lifecycle(
                 repo_id,
                 lifecycle_status="ready",
                 last_ready_at=_now_iso(),
                 last_error=None,
                 last_setup_activity_id=activity_id,
+            )
+            store.update_activity(
+                activity_id,
+                status="done",
+                summary=summary,
+                session_id=last_session_id,
+                cost_usd=last_cost_usd,
             )
             logger.info("Setup activity %s completed", activity_id)
             return

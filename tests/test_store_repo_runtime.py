@@ -221,3 +221,81 @@ def test_store_migrates_legacy_init_activities_to_setup(tmp_path):
 
     assert activity is not None
     assert activity["kind"] == "setup"
+
+
+def test_store_migrates_completed_legacy_init_to_ready_repo(tmp_path):
+    db_path = tmp_path / "legacy-init-ready.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS repos (
+            id TEXT PRIMARY KEY,
+            repo_url TEXT NOT NULL,
+            watch INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS activities (
+            id TEXT PRIMARY KEY,
+            repo_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            trigger TEXT,
+            status TEXT DEFAULT 'pending',
+            session_id TEXT,
+            summary TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (repo_id) REFERENCES repos(id)
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO repos (id, repo_url, created_at) VALUES (?, ?, ?)",
+        ("owner-repo", "https://github.com/owner/repo", "2026-03-24T12:00:00+00:00"),
+    )
+    conn.execute(
+        "INSERT INTO activities (id, repo_id, kind, trigger, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            "activity-init",
+            "owner-repo",
+            "init",
+            "watch",
+            "done",
+            "2026-03-24T12:00:00+00:00",
+            "2026-03-24T12:10:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    store = Store(db_path=db_path)
+    repo = store.get_repo("owner-repo")
+    activity = store.get_activity("activity-init")
+
+    assert activity is not None
+    assert activity["kind"] == "setup"
+    assert repo is not None
+    assert repo["lifecycle_status"] == "ready"
+    assert repo["last_setup_activity_id"] == "activity-init"
+    assert repo["last_ready_at"] == "2026-03-24T12:10:00+00:00"
+
+
+def test_mark_crashed_setup_activities_fail_repo_readiness(store):
+    store.add_repo("owner-repo", "https://github.com/owner/repo")
+    store.update_repo_lifecycle("owner-repo", lifecycle_status="setting_up")
+    activity_id = store.add_activity("owner-repo", "setup", "watch")
+    store.update_activity(activity_id, status="running")
+
+    crashed = store.mark_crashed_activities_failed()
+
+    assert crashed == 1
+    activity = store.get_activity(activity_id)
+    repo = store.get_repo("owner-repo")
+    assert activity is not None
+    assert activity["status"] == "failed"
+    assert activity["summary"] == "Interrupted (daemon restarted)"
+    assert repo is not None
+    assert repo["lifecycle_status"] == "error"
+    assert repo["last_error"] == "Interrupted (daemon restarted)"
+    assert repo["last_setup_activity_id"] == activity_id
