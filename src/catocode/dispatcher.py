@@ -143,7 +143,8 @@ def _index_repo_from_container(
     # Check if re-index needed
     state = store.get_code_index_state(repo_id)
     if state and current_commit and state.get("last_indexed_commit") == current_commit:
-        return
+        if store.has_code_definitions(repo_id):
+            return
 
     # Clear stale definitions before re-indexing
     store.clear_code_definitions(repo_id)

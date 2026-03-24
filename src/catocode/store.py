@@ -1109,6 +1109,13 @@ class Store:
             (repo_id,),
         )
 
+    def has_code_definitions(self, repo_id: str) -> bool:
+        row = self._db.execute_one(
+            "SELECT 1 as found FROM code_definitions WHERE repo_id = ? LIMIT 1",
+            (repo_id,),
+        )
+        return row is not None
+
     def search_code_definitions(
         self,
         repo_id: str,

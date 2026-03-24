@@ -28,19 +28,34 @@ def _compute_changed_files(
     current_commit: str,
     container_mgr: "ContainerManager",
     repo_workdir: str,
-) -> list[str] | None:
+) -> tuple[list[str] | None, bool]:
     if not previous_commit:
-        return None
+        return None, False
 
     result = container_mgr.exec(
-        f"git diff --name-only --diff-filter=ACMR {previous_commit}..{current_commit}",
+        f"git diff --name-status --diff-filter=ACMRD {previous_commit}..{current_commit}",
         workdir=repo_workdir,
     )
     if result.exit_code != 0:
-        return None
+        return None, False
 
-    changed_files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    return changed_files or None
+    changed_files: list[str] = []
+    requires_full_reindex = False
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split("\t")
+        status = parts[0]
+        if status.startswith(("D", "R")):
+            requires_full_reindex = True
+        if status.startswith("R"):
+            if len(parts) >= 3 and parts[2]:
+                changed_files.append(parts[2])
+            continue
+        if len(parts) >= 2 and parts[1]:
+            changed_files.append(parts[1])
+    return changed_files or None, requires_full_reindex
 
 
 def _repair_codebase_graph(
@@ -49,7 +64,14 @@ def _repair_codebase_graph(
     container_mgr: "ContainerManager",
     repo_workdir: str,
 ):
-    changed_files = _compute_changed_files(previous_commit, current_commit, container_mgr, repo_workdir)
+    changed_files, requires_full_reindex = _compute_changed_files(
+        previous_commit,
+        current_commit,
+        container_mgr,
+        repo_workdir,
+    )
+    if requires_full_reindex:
+        return container_mgr.exec("cg index .", workdir=repo_workdir)
     if changed_files:
         quoted_files = " ".join(shlex.quote(path) for path in changed_files)
         return container_mgr.exec(f"cg update --root . {quoted_files}", workdir=repo_workdir)
