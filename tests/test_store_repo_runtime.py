@@ -301,6 +301,28 @@ def test_mark_crashed_setup_activities_fail_repo_readiness(store):
     assert repo["last_setup_activity_id"] == activity_id
 
 
+def test_mark_crashed_setup_activities_fail_running_steps(store):
+    store.add_repo("owner-repo", "https://github.com/owner/repo")
+    store.update_repo_lifecycle("owner-repo", lifecycle_status="setting_up")
+    activity_id = store.add_activity("owner-repo", "setup", "watch")
+    store.update_activity(activity_id, status="running")
+    store.upsert_activity_step(
+        activity_id,
+        "clone",
+        status="running",
+        started_at="2026-03-24T12:00:00+00:00",
+    )
+
+    store.mark_crashed_activities_failed()
+
+    step = store.get_activity_step(activity_id, "clone")
+    assert step is not None
+    assert step["status"] == "failed"
+    assert step["reason"] == "Interrupted (daemon restarted)"
+    assert step["finished_at"] is not None
+    assert step["duration_ms"] is not None
+
+
 def test_store_restart_does_not_resurrect_repo_after_newer_failed_setup(tmp_path):
     db_path = tmp_path / "restart.db"
     store = Store(db_path=db_path)

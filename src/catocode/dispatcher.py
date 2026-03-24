@@ -104,11 +104,9 @@ def _find_reusable_setup_activity(
     return None
 
 
-def _find_latest_completed_setup_activity(store: "Store", repo_id: str) -> dict | None:
+def _find_latest_setup_activity(store: "Store", repo_id: str) -> dict | None:
     for candidate in reversed(store.list_activities(repo_id=repo_id)):
         if candidate["kind"] != "setup":
-            continue
-        if candidate["status"] != "done":
             continue
         return candidate
     return None
@@ -249,21 +247,21 @@ async def dispatch(
         # 3. Ensure repo setup is complete before other activity kinds proceed.
         result = container_mgr.exec("test -f CLAUDE.md", workdir=f"/repos/{repo_id}")
         has_claude_md = result.exit_code == 0
-        completed_setup = _find_latest_completed_setup_activity(store, repo_id)
-        setup_complete = has_claude_md and completed_setup is not None
+        latest_setup = _find_latest_setup_activity(store, repo_id)
+        setup_complete = has_claude_md and latest_setup is not None and latest_setup["status"] == "done"
         if setup_complete and repo.get("lifecycle_status") != "ready":
             store.update_repo_lifecycle(
                 repo_id,
                 lifecycle_status="ready",
                 last_ready_at=(
-                    completed_setup["updated_at"]
-                    if completed_setup is not None
+                    latest_setup["updated_at"]
+                    if latest_setup is not None
                     else repo.get("last_ready_at") or _now_iso()
                 ),
                 last_error=None,
                 last_setup_activity_id=(
-                    completed_setup["id"]
-                    if completed_setup is not None
+                    latest_setup["id"]
+                    if latest_setup is not None
                     else repo.get("last_setup_activity_id")
                 ),
             )

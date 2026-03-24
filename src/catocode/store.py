@@ -223,6 +223,17 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _duration_ms(started_at: str | None, finished_at: str) -> int | None:
+    if not started_at:
+        return None
+    try:
+        started = datetime.fromisoformat(started_at)
+        finished = datetime.fromisoformat(finished_at)
+    except ValueError:
+        return None
+    return max(0, int((finished - started).total_seconds() * 1000))
+
+
 _UNSET = object()
 
 
@@ -551,6 +562,7 @@ class Store:
         crashed_setups = self._db.execute(
             "SELECT id, repo_id FROM activities WHERE status = 'running' AND kind = 'setup'"
         )
+        failed_at = _now()
         rows_before = self._db.execute(
             "SELECT COUNT(*) as c FROM activities WHERE status = 'running'"
         )
@@ -559,9 +571,25 @@ class Store:
             "UPDATE activities SET status = 'failed', "
             "summary = 'Interrupted (daemon restarted)', updated_at = ? "
             "WHERE status = 'running'",
-            (_now(),),
+            (failed_at,),
         )
         for activity in crashed_setups:
+            running_steps = self._db.execute(
+                "SELECT step_key, started_at FROM activity_steps WHERE activity_id = ? AND status = 'running'",
+                (activity["id"],),
+            )
+            for step in running_steps:
+                self._db.execute(
+                    "UPDATE activity_steps SET status = 'failed', finished_at = ?, duration_ms = ?, reason = ? "
+                    "WHERE activity_id = ? AND step_key = ?",
+                    (
+                        failed_at,
+                        _duration_ms(step["started_at"], failed_at),
+                        "Interrupted (daemon restarted)",
+                        activity["id"],
+                        step["step_key"],
+                    ),
+                )
             self._db.execute(
                 "UPDATE repos SET lifecycle_status = 'error', last_error = ?, last_setup_activity_id = ? "
                 "WHERE id = ?",

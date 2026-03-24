@@ -460,6 +460,59 @@ async def test_dispatch_runs_setup_when_claude_md_exists_without_completed_setup
 
 
 @pytest.mark.asyncio
+async def test_dispatch_requires_latest_setup_attempt_to_be_done(store, monkeypatch):
+    from catocode.dispatcher import dispatch
+
+    repo_id = "owner-repo"
+    store.add_repo(repo_id, "https://github.com/owner/repo")
+    successful_setup_id = store.add_activity(repo_id, "setup", "watch")
+    store.update_activity(successful_setup_id, status="done", summary="setup complete")
+
+    failed_setup_id = store.add_activity(repo_id, "setup", "retry")
+    store.update_activity(failed_setup_id, status="failed", summary="setup failed")
+    store.update_repo_lifecycle(
+        repo_id,
+        lifecycle_status="error",
+        last_error="setup failed",
+        last_setup_activity_id=failed_setup_id,
+    )
+
+    task_activity_id = store.add_activity(repo_id, "task", "do the thing")
+    container_mgr = ClaudeMdPresentWithoutSetupContainerManager()
+    executed_activity_ids: list[str] = []
+
+    async def fake_execute_sdk_runner(**kwargs):
+        executed_activity_ids.append(kwargs["activity_id"])
+        return 0, f"session-{kwargs['activity_id'][:8]}", 0.1
+
+    monkeypatch.setattr("catocode.dispatcher._execute_sdk_runner", fake_execute_sdk_runner)
+    monkeypatch.setattr("catocode.dispatcher._index_repo_from_container", lambda *args, **kwargs: None)
+
+    await dispatch(
+        activity_id=task_activity_id,
+        store=store,
+        container_mgr=container_mgr,
+        anthropic_api_key="anthropic-key",
+        github_token="github-token",
+        verbose=False,
+    )
+
+    activities = store.list_activities(repo_id=repo_id)
+    setup_activities = [activity for activity in activities if activity["kind"] == "setup"]
+    assert len(setup_activities) == 3
+    newest_setup = setup_activities[-1]
+    assert newest_setup["status"] == "done"
+    assert newest_setup["id"] not in {successful_setup_id, failed_setup_id}
+    assert executed_activity_ids[0] == newest_setup["id"]
+    assert executed_activity_ids[1] == task_activity_id
+
+    repo = store.get_repo(repo_id)
+    assert repo is not None
+    assert repo["lifecycle_status"] == "ready"
+    assert repo["last_setup_activity_id"] == newest_setup["id"]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_waits_for_existing_running_setup_activity(store, monkeypatch):
     from catocode.dispatcher import dispatch
 
