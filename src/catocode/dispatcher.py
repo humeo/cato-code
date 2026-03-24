@@ -87,6 +87,22 @@ def _finish_activity_step(
     )
 
 
+def _find_reusable_setup_activity(
+    store: "Store",
+    repo_id: str,
+    current_activity_id: str,
+) -> dict | None:
+    for candidate in reversed(store.list_activities(repo_id=repo_id)):
+        if candidate["id"] == current_activity_id:
+            continue
+        if candidate["kind"] != "setup":
+            continue
+        if candidate["status"] not in {"pending", "running"}:
+            continue
+        return candidate
+    return None
+
+
 def _index_repo_from_container(
     repo_id: str,
     container_mgr: "ContainerManager",
@@ -210,21 +226,38 @@ async def dispatch(
             needs_setup = result.exit_code != 0
 
         if needs_setup:
-            logger.info("Repo %s needs setup, running setup activity first", repo_id)
-            setup_activity_id = store.add_activity(repo_id, "setup", "auto")
-            await _run_setup(
-                activity_id=setup_activity_id,
-                repo_id=repo_id,
-                repo_url=repo_url,
-                store=store,
-                container_mgr=container_mgr,
-                verbose=verbose,
-            )
-            setup_activity = store.get_activity(setup_activity_id)
+            setup_activity = _find_reusable_setup_activity(store, repo_id, activity_id)
+            if setup_activity is None:
+                logger.info("Repo %s needs setup, creating setup activity", repo_id)
+                setup_activity_id = store.add_activity(repo_id, "setup", "auto")
+                await _run_setup(
+                    activity_id=setup_activity_id,
+                    repo_id=repo_id,
+                    repo_url=repo_url,
+                    store=store,
+                    container_mgr=container_mgr,
+                    verbose=verbose,
+                )
+                setup_activity = store.get_activity(setup_activity_id)
+            elif setup_activity["status"] == "pending":
+                logger.info("Repo %s needs setup, reusing pending setup activity %s", repo_id, setup_activity["id"])
+                await _run_setup(
+                    activity_id=setup_activity["id"],
+                    repo_id=repo_id,
+                    repo_url=repo_url,
+                    store=store,
+                    container_mgr=container_mgr,
+                    verbose=verbose,
+                )
+                setup_activity = store.get_activity(setup_activity["id"])
+            else:
+                logger.info("Repo %s setup already running via %s", repo_id, setup_activity["id"])
             if setup_activity is None or setup_activity["status"] != "done":
                 summary = "Repo setup failed"
                 if setup_activity is not None and setup_activity.get("summary"):
                     summary = setup_activity["summary"]
+                elif setup_activity is not None and setup_activity["status"] == "running":
+                    summary = "Repo setup still running"
                 raise RuntimeError(summary)
 
         # 4. Reset repo to clean state (skip for respond_review — needs existing PR branch)
@@ -531,6 +564,8 @@ async def _run_setup(
                     error_summary,
                     RETRY_DELAY_SECS,
                 )
+                if current_step != "clone":
+                    container_mgr.reset_repo(repo_id)
                 await asyncio.sleep(RETRY_DELAY_SECS)
                 continue
 

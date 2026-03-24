@@ -65,6 +65,52 @@ class FailingSetupContainerManager:
         raise AssertionError("reset_repo should not run for setup retries")
 
 
+class ReusableSetupContainerManager:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str]] = []
+
+    def ensure_running(self, anthropic_api_key: str, github_token: str, anthropic_base_url: str | None = None) -> None:
+        self.events.append(("ensure_running", anthropic_api_key))
+
+    def ensure_repo(self, repo_id: str, repo_url: str) -> None:
+        self.events.append(("ensure_repo", repo_id))
+
+    def exec(self, command: str, workdir: str = "/repos") -> FakeExecResult:
+        self.events.append(("exec", command))
+        if command.startswith("cg index"):
+            return FakeExecResult(exit_code=0, stdout="Indexed\n")
+        if "cg stats" in command:
+            return FakeExecResult(exit_code=0, stdout="Files: 12\nSymbols: 34\n")
+        if command == "git rev-parse HEAD":
+            return FakeExecResult(exit_code=0, stdout="abc123\n")
+        raise AssertionError(f"Unexpected command: {command}")
+
+    def reset_repo(self, repo_id: str) -> None:
+        self.events.append(("reset_repo", repo_id))
+
+
+class RetryAfterInitFailureContainerManager:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str]] = []
+
+    def ensure_running(self, anthropic_api_key: str, github_token: str, anthropic_base_url: str | None = None) -> None:
+        self.events.append(("ensure_running", anthropic_api_key))
+
+    def ensure_repo(self, repo_id: str, repo_url: str) -> None:
+        self.events.append(("ensure_repo", repo_id))
+
+    def exec(self, command: str, workdir: str = "/repos") -> FakeExecResult:
+        self.events.append(("exec", command))
+        if command.startswith("cg index"):
+            return FakeExecResult(exit_code=0, stdout="Indexed\n")
+        if "cg stats" in command:
+            return FakeExecResult(exit_code=0, stdout="Files: 12\nSymbols: 34\n")
+        raise AssertionError(f"Unexpected command: {command}")
+
+    def reset_repo(self, repo_id: str) -> None:
+        self.events.append(("reset_repo", repo_id))
+
+
 @pytest.fixture
 def store(tmp_path):
     return Store(db_path=tmp_path / "test.db")
@@ -212,3 +258,92 @@ async def test_build_prompt_rejects_legacy_init_activity_kind():
 
     with pytest.raises(ValueError, match="Unknown activity kind: 'init'"):
         await _build_prompt(activity, repo, "fake-token")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_reuses_existing_pending_setup_activity(store, monkeypatch):
+    from catocode.dispatcher import dispatch
+
+    repo_id = "owner-repo"
+    store.add_repo(repo_id, "https://github.com/owner/repo")
+    store.update_repo_lifecycle(repo_id, lifecycle_status="setting_up")
+    queued_setup_id = store.add_activity(repo_id, "setup", "watch")
+    task_activity_id = store.add_activity(repo_id, "task", "do the thing")
+
+    container_mgr = ReusableSetupContainerManager()
+    executed_activity_ids: list[str] = []
+
+    async def fake_execute_sdk_runner(**kwargs):
+        executed_activity_ids.append(kwargs["activity_id"])
+        return 0, f"session-{kwargs['activity_id'][:8]}", 0.1
+
+    monkeypatch.setattr("catocode.dispatcher._execute_sdk_runner", fake_execute_sdk_runner)
+    monkeypatch.setattr("catocode.dispatcher._index_repo_from_container", lambda *args, **kwargs: None)
+
+    await dispatch(
+        activity_id=task_activity_id,
+        store=store,
+        container_mgr=container_mgr,
+        anthropic_api_key="anthropic-key",
+        github_token="github-token",
+        verbose=False,
+    )
+
+    activities = store.list_activities(repo_id=repo_id)
+    assert len(activities) == 2
+    assert [activity["kind"] for activity in activities] == ["setup", "task"]
+
+    setup_activity = store.get_activity(queued_setup_id)
+    assert setup_activity is not None
+    assert setup_activity["status"] == "done"
+    assert setup_activity["trigger"] == "watch"
+
+    assert executed_activity_ids[0] == queued_setup_id
+    assert executed_activity_ids[1] == task_activity_id
+
+
+@pytest.mark.asyncio
+async def test_setup_retry_resets_repo_after_init_failure(store, monkeypatch):
+    from catocode.dispatcher import dispatch
+
+    repo_id = "owner-repo"
+    store.add_repo(repo_id, "https://github.com/owner/repo")
+    activity_id = store.add_activity(repo_id, "setup", "watch")
+
+    container_mgr = RetryAfterInitFailureContainerManager()
+    sleep_calls: list[float] = []
+    execute_attempts = 0
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    async def fake_execute_sdk_runner(**kwargs):
+        nonlocal execute_attempts
+        execute_attempts += 1
+        if execute_attempts == 1:
+            store.add_log(kwargs["activity_id"], '{"type":"result","result":"init failed","is_error":true}')
+            return 1, None, None
+        return 0, "session-123", 0.42
+
+    monkeypatch.setattr("catocode.dispatcher.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("catocode.dispatcher._execute_sdk_runner", fake_execute_sdk_runner)
+
+    await dispatch(
+        activity_id=activity_id,
+        store=store,
+        container_mgr=container_mgr,
+        anthropic_api_key="anthropic-key",
+        github_token="github-token",
+        verbose=False,
+    )
+
+    activity = store.get_activity(activity_id)
+    assert activity is not None
+    assert activity["status"] == "done"
+    assert sleep_calls == [30]
+    assert container_mgr.events.count(("reset_repo", repo_id)) == 1
+
+    ensure_repo_positions = [idx for idx, event in enumerate(container_mgr.events) if event == ("ensure_repo", repo_id)]
+    reset_position = container_mgr.events.index(("reset_repo", repo_id))
+    assert len(ensure_repo_positions) == 2
+    assert ensure_repo_positions[0] < reset_position < ensure_repo_positions[1]
