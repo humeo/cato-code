@@ -1,7 +1,5 @@
 """Tests for skill_renderer module."""
 
-from pathlib import Path
-
 import pytest
 
 from catocode.skill_renderer import (
@@ -150,25 +148,13 @@ def test_build_respond_review_prompt():
     assert "Please add null check" in prompt
 
 
-def test_build_fix_issue_prompt_with_code_context():
-    code_context = """## Pre-loaded Code Context
-
-### `src/auth.py`
-
-**function `validate_token`** (lines 10-20)
-```
-def validate_token(token: str) -> bool
-```
-"""
+def test_build_fix_issue_prompt_has_no_preloaded_code_context_section():
     prompt = build_fix_issue_prompt(
         issue_number="42",
         repo_id="owner-repo",
         issue_data="Token validation fails on empty input",
-        code_context=code_context,
     )
-    assert "Pre-loaded Code Context" in prompt
-    assert "validate_token" in prompt
-    assert "src/auth.py" in prompt
+    assert "Pre-loaded Code Context" not in prompt
     assert "## Current Task" in prompt
     assert "#42" in prompt
 
@@ -179,17 +165,19 @@ def test_build_fix_issue_prompt_without_code_context():
         repo_id="owner-repo",
         issue_data="Some bug",
     )
-    # "validate_token" is injected content — should NOT appear without code_context
-    assert "validate_token" not in prompt
+    assert "Pre-loaded Code Context" not in prompt
     assert "## Current Task" in prompt
 
 
-def test_build_analyze_issue_prompt_with_code_context():
-    code_context = "## Pre-loaded Code Context\n\nSome code here"
+def test_build_analyze_issue_prompt_has_no_preloaded_code_context_section():
     prompt = build_analyze_issue_prompt(
         issue_number="42",
         repo_id="owner-repo",
         issue_data="Some issue",
-        code_context=code_context,
     )
-    assert "Pre-loaded Code Context" in prompt
+    assert "Pre-loaded Code Context" not in prompt
+
+
+def test_issue_skills_direct_agent_to_codebase_graph():
+    assert "codebase_graph" in read_skill("fix_issue")
+    assert "codebase_graph" in read_skill("analyze_issue")

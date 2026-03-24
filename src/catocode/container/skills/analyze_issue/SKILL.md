@@ -29,12 +29,14 @@ If you see a highly similar issue in the list above:
 
 Only continue to the analysis steps below if no duplicate was found.
 
-## Using Pre-loaded Code Context
+## Code Navigation
 
-If a "Pre-loaded Code Context" section appears below, use it to:
-1. Identify which files/functions are likely affected
-2. Assess the scope of the issue more quickly
-3. Provide more specific file references in your analysis comment
+Use the internal `codebase_graph` skill to navigate the repository before making claims about likely root cause or affected files.
+
+1. Start with `cg stats --root .` to confirm the index is usable.
+2. Use `cg context <symbol> --json`, `cg symbol <name> --json`, `cg file <path> --json`, `cg callers`, and `cg callees` to trace the code involved.
+3. Read the underlying files and tests before citing any location in your analysis.
+4. If `cg` is unavailable or incomplete, fall back to normal repo exploration instead of guessing.
 
 ## Your Task
 
@@ -135,4 +137,3 @@ To proceed with the fix, reply with `/approve` or specify which solution to use.
 ```
 
 Begin your analysis now.
-

@@ -19,16 +19,15 @@ Before starting, gather the necessary context:
    - Any special reproduction requirements
 3. **Fetch the issue**: Use `gh issue view {issue_number}` to get the full issue description
 
-## Using Pre-loaded Code Context
+## Code Navigation
 
-If a "Pre-loaded Code Context" section appears below, CatoCode has already identified potentially relevant code locations based on the issue description. Use this as your starting point:
+Use the internal `codebase_graph` skill for structured code navigation instead of relying on host-provided context.
 
-1. **Read the identified files first** — they are likely where the bug lives
-2. **Follow the dependency chain** — if a function calls another, read the callee too
-3. **Check nearby test files** — look in `tests/` for files matching the source path
-4. **Don't stop here** — the pre-loaded context may be incomplete. Continue exploring if the root cause isn't in the listed files.
-
-If no code context is provided, start exploration from scratch using the repo's CLAUDE.md and `grep`/`find` tools.
+1. Run `cg stats --root .` to confirm the repo index is available.
+2. Use `cg context <symbol> --json` as the primary way to understand affected code.
+3. Use `cg symbol`, `cg file`, `cg callers`, and `cg callees` to trace the blast radius before editing.
+4. Verify all important findings by reading the real source and tests.
+5. If `cg` is unavailable or does not help, fall back to normal repo exploration and continue.
 
 ## The Two-Layer Evidence Protocol
 

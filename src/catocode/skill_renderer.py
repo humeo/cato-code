@@ -95,7 +95,6 @@ def build_fix_issue_prompt(
     repo_id: str,
     issue_data: str,
     skill_name: str = "fix_issue",
-    code_context: str = "",
 ) -> str:
     """Build a prompt for fixing a GitHub issue using the fix_issue skill.
 
@@ -104,8 +103,6 @@ def build_fix_issue_prompt(
         repo_id: Repository identifier (e.g., "owner-repo")
         issue_data: Full issue details from `gh issue view`
         skill_name: Name of the skill to use
-        code_context: Pre-loaded code context to inject before the current task
-
     Returns:
         Complete prompt for the SDK runner
     """
@@ -121,21 +118,12 @@ def build_fix_issue_prompt(
     # Render the skill
     skill_content = render_skill_prompt(skill_template, context)
 
-    code_context_section = ""
-    if code_context:
-        code_context_section = f"""
-{code_context}
-
----
-
-"""
-
     # Append the current task details
     prompt = f"""{skill_content}
 
 ---
 
-{code_context_section}## Current Task
+## Current Task
 
 You are fixing issue #{issue_number} in repository {repo_id}.
 
@@ -375,7 +363,6 @@ def build_analyze_issue_prompt(
     issue_data: str,
     relevant_issues: list[dict] | None = None,
     skill_name: str = "analyze_issue",
-    code_context: str = "",
 ) -> str:
     """Build a prompt for analyzing a GitHub issue using the analyze_issue skill.
 
@@ -385,8 +372,6 @@ def build_analyze_issue_prompt(
         issue_data: Full issue details
         relevant_issues: List of potentially related open issues from RAG
         skill_name: Name of the skill to use
-        code_context: Pre-loaded code context to inject before the current task
-
     Returns:
         Complete prompt for the SDK runner
     """
@@ -414,20 +399,11 @@ def build_analyze_issue_prompt(
 
     skill_content = render_skill_prompt(skill_template, context)
 
-    code_context_section = ""
-    if code_context:
-        code_context_section = f"""
-{code_context}
-
----
-
-"""
-
     prompt = f"""{skill_content}
 
 ---
 
-{code_context_section}## Current Task
+## Current Task
 
 You are analyzing issue #{issue_number} in repository {repo_id}.
 

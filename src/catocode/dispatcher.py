@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from .codebase_graph_runtime import prepare_issue_codebase_graph_runtime
 from .config import parse_repo_url
 from .github.commenter import failure_comment, post_issue_comment
 from .github.issue_fetcher import fetch_issue
@@ -306,37 +307,17 @@ async def dispatch(
         if activity["kind"] != "respond_review":
             container_mgr.reset_repo(repo_id)
 
-        # 3.5. Index repo code definitions (for context retrieval)
+        # 3.5. Index repo code definitions for non-issue flows that still use store-backed retrieval.
         try:
             sha_result = container_mgr.exec("git rev-parse HEAD", workdir=f"/repos/{repo_id}")
             current_sha = sha_result.stdout.strip() if sha_result.exit_code == 0 else None
-            _index_repo_from_container(repo_id, container_mgr, store, current_sha)
+            if activity["kind"] not in ("fix_issue", "analyze_issue"):
+                _index_repo_from_container(repo_id, container_mgr, store, current_sha)
         except Exception as e:
             logger.debug("Code indexing skipped: %s", e)
 
-        # 4.5. Retrieve code context (optional, graceful degradation)
-        code_context_md = ""
-        if activity["kind"] in ("fix_issue", "analyze_issue"):
-            try:
-                from .context_retriever import build_code_context
-                issue_text = ""
-                trigger = activity["trigger"] or ""
-                if trigger.startswith("issue:"):
-                    issue_number_str = trigger.split(":", 1)[1]
-                    owner, repo_name = parse_repo_url(repo["repo_url"])
-                    issue = await fetch_issue(owner, repo_name, int(issue_number_str), github_token)
-                    issue_text = f"{issue.title}\n{issue.body}"
-                if issue_text:
-                    ctx = build_code_context(repo_id, issue_text, store)
-                    code_context_md = ctx.to_markdown()
-                    if code_context_md:
-                        logger.info("Code context: %d definitions for activity %s",
-                                    len(ctx.relevant_definitions), activity_id[:8])
-            except Exception as e:
-                logger.debug("Code context retrieval skipped: %s", e)
-
         # 5. Build prompt based on activity kind
-        prompt = await _build_prompt(activity, repo, github_token, store, code_context_md=code_context_md)
+        prompt = await _build_prompt(activity, repo, github_token, store)
 
         # 6. Update status to running
         store.update_activity(activity_id, status="running")
@@ -351,6 +332,11 @@ async def dispatch(
         session_id = None
         cost_usd = None
         for attempt in range(1, MAX_RETRIES + 1):
+            if activity["kind"] in ("fix_issue", "analyze_issue"):
+                try:
+                    prepare_issue_codebase_graph_runtime(repo_id, container_mgr, store, repo_workdir=f"/repos/{repo_id}")
+                except Exception as e:
+                    logger.debug("Codebase graph runtime prep skipped: %s", e)
             exit_code, session_id, cost_usd = await _execute_sdk_runner(
                 activity_id=activity_id,
                 repo_id=repo_id,
@@ -631,7 +617,7 @@ async def _run_setup(
             return
 
 
-async def _build_prompt(activity: dict, repo: dict, github_token: str, store: "Store | None" = None, code_context_md: str = "") -> str:
+async def _build_prompt(activity: dict, repo: dict, github_token: str, store: "Store | None" = None) -> str:
     """Build prompt based on activity kind using skill-based templates."""
     kind = activity["kind"]
     trigger = activity["trigger"] or ""
@@ -655,7 +641,6 @@ Created: {issue.created_at}
             issue_number=issue_number,
             repo_id=repo.get("id", f"{owner}-{repo_name}"),
             issue_data=issue_data,
-            code_context=code_context_md,
         )
 
     elif kind == "triage":
@@ -707,7 +692,6 @@ Labels: {', '.join(issue.labels) if issue.labels else 'None'}
             repo_id=repo.get("id", f"{owner}-{repo_name}"),
             issue_data=issue_data,
             relevant_issues=relevant_issues,
-            code_context=code_context_md,
         )
 
     elif kind == "patrol":
