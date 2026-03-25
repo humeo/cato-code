@@ -187,8 +187,46 @@ CREATE TABLE IF NOT EXISTS codebase_graph_state (
     symbol_count INTEGER DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS runtime_sessions (
+    id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL,
+    sdk_session_id TEXT,
+    entry_kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    branch_name TEXT NOT NULL,
+    fork_from_session_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_activity_at TEXT NOT NULL,
+    terminal_at TEXT,
+    gc_eligible_at TEXT,
+    gc_delete_after TEXT,
+    gc_status TEXT,
+    FOREIGN KEY (repo_id) REFERENCES repos(id)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_session_issue_links (
+    session_id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL,
+    issue_number INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_session_pr_links (
+    session_id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL,
+    pr_number INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_code_defs_repo_name ON code_definitions(repo_id, symbol_name);
 CREATE INDEX IF NOT EXISTS idx_code_defs_repo_file ON code_definitions(repo_id, file_path);
+CREATE INDEX IF NOT EXISTS idx_runtime_sessions_repo_status ON runtime_sessions(repo_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_runtime_session_issue_repo_issue ON runtime_session_issue_links(repo_id, issue_number, created_at);
+CREATE INDEX IF NOT EXISTS idx_runtime_session_pr_repo_pr ON runtime_session_pr_links(repo_id, pr_number, created_at);
 """
 
 # Migrations: columns added after initial schema
@@ -228,6 +266,41 @@ _MIGRATIONS = [
     """CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_inflight_refresh_repo_memory_review
 ON activities(repo_id, trigger)
 WHERE kind = 'refresh_repo_memory_review' AND status IN ('pending', 'running')""",
+    """CREATE TABLE IF NOT EXISTS runtime_sessions (
+    id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL,
+    sdk_session_id TEXT,
+    entry_kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    branch_name TEXT NOT NULL,
+    fork_from_session_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_activity_at TEXT NOT NULL,
+    terminal_at TEXT,
+    gc_eligible_at TEXT,
+    gc_delete_after TEXT,
+    gc_status TEXT,
+    FOREIGN KEY (repo_id) REFERENCES repos(id)
+)""",
+    """CREATE TABLE IF NOT EXISTS runtime_session_issue_links (
+    session_id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL,
+    issue_number INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+)""",
+    """CREATE TABLE IF NOT EXISTS runtime_session_pr_links (
+    session_id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL,
+    pr_number INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+)""",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_sessions_repo_status ON runtime_sessions(repo_id, status, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_session_issue_repo_issue ON runtime_session_issue_links(repo_id, issue_number, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_session_pr_repo_pr ON runtime_session_pr_links(repo_id, pr_number, created_at)",
 ]
 
 
@@ -576,6 +649,145 @@ class Store:
     def delete_activity_steps(self, activity_id: str) -> None:
         self._db.execute("DELETE FROM activity_steps WHERE activity_id = ?", (activity_id,))
         self._db.commit()
+
+    # --- runtime sessions ---
+
+    def create_runtime_session(
+        self,
+        repo_id: str,
+        entry_kind: str,
+        status: str,
+        worktree_path: str,
+        branch_name: str,
+        issue_number: int | None = None,
+        pr_number: int | None = None,
+        sdk_session_id: str | None = None,
+        fork_from_session_id: str | None = None,
+    ) -> str:
+        session_id = str(uuid.uuid4())
+        now = _now()
+        self._db.execute(
+            """INSERT INTO runtime_sessions (
+                   id, repo_id, sdk_session_id, entry_kind, status, worktree_path,
+                   branch_name, fork_from_session_id, created_at, updated_at,
+                   last_activity_at, terminal_at, gc_eligible_at, gc_delete_after, gc_status
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)""",
+            (
+                session_id,
+                repo_id,
+                sdk_session_id,
+                entry_kind,
+                status,
+                worktree_path,
+                branch_name,
+                fork_from_session_id,
+                now,
+                now,
+                now,
+            ),
+        )
+        if issue_number is not None:
+            self._db.execute(
+                """INSERT INTO runtime_session_issue_links (session_id, repo_id, issue_number, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (session_id, repo_id, issue_number, now),
+            )
+        if pr_number is not None:
+            self._db.execute(
+                """INSERT INTO runtime_session_pr_links (session_id, repo_id, pr_number, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (session_id, repo_id, pr_number, now),
+            )
+        self._db.commit()
+        return session_id
+
+    def get_runtime_session(self, session_id: str) -> dict | None:
+        return self._db.execute_one("SELECT * FROM runtime_sessions WHERE id = ?", (session_id,))
+
+    def list_repo_runtime_sessions(self, repo_id: str, statuses: tuple[str, ...] | None = None) -> list[dict]:
+        if statuses:
+            placeholders = ", ".join("?" for _ in statuses)
+            return self._db.execute(
+                f"""SELECT * FROM runtime_sessions
+                    WHERE repo_id = ? AND status IN ({placeholders})
+                    ORDER BY created_at""",
+                (repo_id, *statuses),
+            )
+        return self._db.execute(
+            "SELECT * FROM runtime_sessions WHERE repo_id = ? ORDER BY created_at",
+            (repo_id,),
+        )
+
+    def find_issue_runtime_session(self, repo_id: str, issue_number: int) -> dict | None:
+        return self._db.execute_one(
+            """SELECT rs.*
+               FROM runtime_sessions rs
+               JOIN runtime_session_issue_links ril ON ril.session_id = rs.id
+               WHERE ril.repo_id = ? AND ril.issue_number = ?
+               ORDER BY rs.created_at DESC
+               LIMIT 1""",
+            (repo_id, issue_number),
+        )
+
+    def find_pr_runtime_session(self, repo_id: str, pr_number: int) -> dict | None:
+        return self._db.execute_one(
+            """SELECT rs.*
+               FROM runtime_sessions rs
+               JOIN runtime_session_pr_links rpl ON rpl.session_id = rs.id
+               WHERE rpl.repo_id = ? AND rpl.pr_number = ?
+               ORDER BY rs.created_at DESC
+               LIMIT 1""",
+            (repo_id, pr_number),
+        )
+
+    def link_runtime_session_pr(self, session_id: str, pr_number: int) -> None:
+        session = self.get_runtime_session(session_id)
+        if session is None:
+            raise ValueError(f"Runtime session {session_id} not found")
+        existing = self._db.execute_one(
+            "SELECT session_id FROM runtime_session_pr_links WHERE session_id = ?",
+            (session_id,),
+        )
+        if existing is None:
+            self._db.execute(
+                """INSERT INTO runtime_session_pr_links (session_id, repo_id, pr_number, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (session_id, session["repo_id"], pr_number, _now()),
+            )
+        else:
+            self._db.execute(
+                "UPDATE runtime_session_pr_links SET pr_number = ? WHERE session_id = ?",
+                (pr_number, session_id),
+            )
+        self._db.commit()
+
+    def update_runtime_session(self, session_id: str, **fields: object) -> None:
+        if not fields:
+            return
+        fields["updated_at"] = _now()
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = tuple(fields.values()) + (session_id,)
+        self._db.execute(f"UPDATE runtime_sessions SET {set_clause} WHERE id = ?", values)
+        self._db.commit()
+
+    def mark_runtime_session_terminal(
+        self,
+        session_id: str,
+        *,
+        status: str,
+        terminal_at: str,
+        gc_eligible_at: str | None,
+        gc_delete_after: str | None,
+    ) -> None:
+        self.update_runtime_session(
+            session_id,
+            status=status,
+            terminal_at=terminal_at,
+            gc_eligible_at=gc_eligible_at,
+            gc_delete_after=gc_delete_after,
+            gc_status="pending" if gc_eligible_at and gc_delete_after else None,
+            last_activity_at=terminal_at,
+        )
 
     def list_activities(self, repo_id: str | None = None, user_id: str | None = None) -> list[dict]:
         if repo_id is not None:
