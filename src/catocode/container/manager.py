@@ -292,8 +292,12 @@ class ContainerManager:
         )
         logger.info("Reset /repos/%s to origin/%s", repo_id, default_branch)
 
-    def reset_checkout(self, workdir: str) -> None:
+    def reset_checkout(self, workdir: str, target_ref: str | None = None) -> None:
         """Reset the current checkout without changing branches."""
+        if target_ref:
+            self.exec(f"git reset --hard {target_ref} && git clean -fdx", workdir=workdir)
+            logger.info("Reset checkout %s to %s", workdir, target_ref)
+            return
         self.exec("git reset --hard && git clean -fdx", workdir=workdir)
         logger.info("Reset checkout %s", workdir)
 

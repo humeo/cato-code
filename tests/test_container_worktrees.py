@@ -74,3 +74,20 @@ def test_remove_session_worktree_removes_worktree_and_branch():
         ("git worktree remove --force /repos/.worktrees/owner-repo/session-123", "/repos/owner-repo"),
         ("git branch -D catocode/session/session-123", "/repos/owner-repo"),
     ]
+
+
+def test_reset_checkout_supports_restoring_checkpoint_ref():
+    manager = object.__new__(ContainerManager)
+    commands: list[tuple[str, str]] = []
+
+    def fake_exec(command: str, workdir: str = "/repos") -> ExecResult:
+        commands.append((command, workdir))
+        return ExecResult(exit_code=0, stdout="", stderr="")
+
+    manager.exec = fake_exec  # type: ignore[attr-defined]
+
+    ContainerManager.reset_checkout(manager, "/repos/.worktrees/owner-repo/session-123", target_ref="abc123")
+
+    assert commands == [
+        ("git reset --hard abc123 && git clean -fdx", "/repos/.worktrees/owner-repo/session-123"),
+    ]
