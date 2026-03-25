@@ -138,19 +138,17 @@ def test_api_activity_detail_includes_steps_runtime_session_and_runtime_result(t
     session_id = store.create_runtime_session(
         repo_id="owner-repo",
         entry_kind="refresh_repo_memory_review",
-        status="done",
+        status="needs_recovery",
         worktree_path="/repos/.worktrees/owner-repo/session-2",
         branch_name="catocode/session/session-2",
     )
-    store.update_runtime_session(
+    store.replace_runtime_session_resolution(
         session_id,
-        resolution_state=json.dumps(
-            {
-                "hypotheses": [{"id": "h1", "summary": "Refresh CLAUDE.md after merge", "status": "confirmed"}],
-                "todos": [{"id": "t1", "content": "Inspect merged diff", "status": "done"}],
-                "checkpoints": [{"id": "c1", "label": "reviewed", "status": "done"}],
-            }
-        ),
+        {
+            "hypotheses": [{"id": "h1", "summary": "Refresh CLAUDE.md after merge", "status": "confirmed"}],
+            "todos": [{"id": "t1", "content": "Inspect merged diff", "status": "done"}],
+            "checkpoints": [{"id": "c1", "label": "reviewed", "status": "done", "commit_sha": "abc123"}],
+        },
     )
     activity_id = store.add_activity(
         "owner-repo",
@@ -189,7 +187,9 @@ def test_api_activity_detail_includes_steps_runtime_session_and_runtime_result(t
     assert resp.status_code == 200
     data = resp.json()
     assert data["runtime_session"]["id"] == session_id
+    assert data["runtime_session"]["status"] == "needs_recovery"
     assert data["runtime_session"]["resolution_state"]["hypotheses"][0]["summary"] == "Refresh CLAUDE.md after merge"
+    assert data["runtime_session"]["latest_checkpoint"]["commit_sha"] == "abc123"
     assert data["runtime_result"]["summary"] == "Repo memory updated"
     assert data["runtime_result"]["writebacks"][0]["kind"] == "issue_comment"
     assert data["steps"][0]["step_key"] == "review_repo_memory"

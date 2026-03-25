@@ -129,6 +129,7 @@ export function ActivityDetail({ activityId }: ActivityDetailProps) {
       ? (activity.runtime_result.artifacts.resolution as Record<string, unknown> | undefined)
       : undefined;
   const writebacks = activity.runtime_result?.writebacks ?? [];
+  const latestCheckpoint = activity.runtime_session?.latest_checkpoint;
 
   const formatDuration = (durationMs: number | null | undefined) => {
     if (durationMs == null) return "—";
@@ -286,13 +287,52 @@ export function ActivityDetail({ activityId }: ActivityDetailProps) {
                       <dd className="text-gray-300">{activity.runtime_session.gc_status ?? "—"}</dd>
                     </div>
                   </div>
+                  {latestCheckpoint && (
+                    <div className="pt-2">
+                      <dt className="text-gray-600">Latest Checkpoint</dt>
+                      <dd className="mt-1 space-y-1 text-gray-300">
+                        <div>{String(latestCheckpoint.label ?? latestCheckpoint.id ?? "checkpoint")}</div>
+                        {"commit_sha" in latestCheckpoint && (
+                          <div className="font-mono text-gray-400 break-all">
+                            {String(latestCheckpoint.commit_sha ?? "—")}
+                          </div>
+                        )}
+                      </dd>
+                    </div>
+                  )}
                   {sessionResolution && (
                     <div className="pt-2">
                       <dt className="text-gray-600">Resolution Memory</dt>
-                      <dd className="mt-1 grid grid-cols-3 gap-3 text-gray-300">
-                        <span>{sessionResolution.hypotheses?.length ?? 0} hypotheses</span>
-                        <span>{sessionResolution.todos?.length ?? 0} todos</span>
-                        <span>{sessionResolution.checkpoints?.length ?? 0} checkpoints</span>
+                      <dd className="mt-1 space-y-3 text-gray-300">
+                        <div className="grid grid-cols-3 gap-3">
+                          <span>{sessionResolution.hypotheses?.length ?? 0} hypotheses</span>
+                          <span>{sessionResolution.todos?.length ?? 0} todos</span>
+                          <span>{sessionResolution.checkpoints?.length ?? 0} checkpoints</span>
+                        </div>
+                        {sessionResolution.hypotheses && sessionResolution.hypotheses.length > 0 && (
+                          <div>
+                            <div className="mb-1 text-gray-600">Hypotheses</div>
+                            <div className="space-y-1">
+                              {sessionResolution.hypotheses.map((item, index) => (
+                                <div key={`hypothesis-${index}`} className="rounded bg-black/20 px-2 py-1">
+                                  {String(item.summary ?? item.id ?? "hypothesis")}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {sessionResolution.todos && sessionResolution.todos.length > 0 && (
+                          <div>
+                            <div className="mb-1 text-gray-600">Todos</div>
+                            <div className="space-y-1">
+                              {sessionResolution.todos.map((item, index) => (
+                                <div key={`todo-${index}`} className="rounded bg-black/20 px-2 py-1">
+                                  {String(item.content ?? item.id ?? "todo")}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </dd>
                     </div>
                   )}

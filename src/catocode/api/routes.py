@@ -50,12 +50,12 @@ def _serialize_activity(activity: dict, store: Store, *, include_detail: bool = 
     payload["runtime_result"] = runtime_result
     if include_detail:
         session = store.get_runtime_session(payload["session_id"]) if payload.get("session_id") else None
-        payload["runtime_session"] = _serialize_runtime_session(session)
+        payload["runtime_session"] = _serialize_runtime_session(store, session)
         payload["steps"] = [dict(step) for step in store.list_activity_steps(payload["id"])]
     return payload
 
 
-def _serialize_runtime_session(session: dict | None) -> dict | None:
+def _serialize_runtime_session(store: Store, session: dict | None) -> dict | None:
     if session is None:
         return None
     payload = dict(session)
@@ -67,6 +67,7 @@ def _serialize_runtime_session(session: dict | None) -> dict | None:
             payload["resolution_state"] = None
     else:
         payload["resolution_state"] = None
+    payload["latest_checkpoint"] = store.get_latest_runtime_session_checkpoint(payload["id"])
     return payload
 
 
@@ -111,7 +112,7 @@ def make_router(store: Store) -> APIRouter:
         # Ownership check
         if stats["repo"].get("user_id") != current_user["id"]:
             raise HTTPException(status_code=403, detail="Access denied")
-        stats["runtime_sessions"] = [_serialize_runtime_session(session) for session in store.list_repo_runtime_sessions(repo_id)]
+        stats["runtime_sessions"] = [_serialize_runtime_session(store, session) for session in store.list_repo_runtime_sessions(repo_id)]
         last_setup_activity_id = stats["repo"].get("last_setup_activity_id")
         stats["last_setup_activity"] = (
             dict(store.get_activity(last_setup_activity_id))

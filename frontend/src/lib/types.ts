@@ -32,6 +32,7 @@ export interface RuntimeSession {
   gc_delete_after: string | null;
   gc_status: string | null;
   gc_error?: string | null;
+  latest_checkpoint?: Record<string, unknown> | null;
   resolution_state?: {
     hypotheses?: Array<Record<string, unknown>>;
     todos?: Array<Record<string, unknown>>;
