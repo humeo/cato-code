@@ -14,6 +14,7 @@ import docker.errors
 import docker.models.containers
 
 from ..config import get_git_user_email, get_git_user_name
+from ..session_runtime import session_branch_name, session_worktree_path
 from .image_builder import _collect_proxy_buildargs, _rewrite_proxy_for_docker
 
 logger = logging.getLogger(__name__)
@@ -289,6 +290,33 @@ class ContainerManager:
             workdir=workdir,
         )
         logger.info("Reset /repos/%s to origin/%s", repo_id, default_branch)
+
+    def ensure_session_worktree(self, repo_id: str, repo_url: str, session_id: str) -> str:
+        """Ensure a dedicated git worktree exists for the runtime session."""
+        self.ensure_repo(repo_id, repo_url)
+        worktree_path = session_worktree_path(repo_id, session_id)
+        branch_name = session_branch_name(session_id)
+        exists = self.exec(f"test -d {worktree_path}/.git")
+        if exists.exit_code == 0:
+            return worktree_path
+
+        self.exec(f"mkdir -p /repos/.worktrees/{repo_id}")
+        self.exec("git fetch origin", workdir=f"/repos/{repo_id}")
+        result = self.exec(
+            f"git worktree add {worktree_path} -b {branch_name}",
+            workdir=f"/repos/{repo_id}",
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(f"git worktree add failed:\n{result.combined}")
+        return worktree_path
+
+    def remove_session_worktree(self, repo_id: str, session_id: str) -> None:
+        """Remove a session worktree and its local branch."""
+        worktree_path = session_worktree_path(repo_id, session_id)
+        branch_name = session_branch_name(session_id)
+        workdir = f"/repos/{repo_id}"
+        self.exec(f"git worktree remove --force {worktree_path}", workdir=workdir)
+        self.exec(f"git branch -D {branch_name}", workdir=workdir)
 
     def stop(self) -> None:
         """Stop container (do NOT remove — preserve volumes)."""
