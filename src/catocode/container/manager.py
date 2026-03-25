@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator
 
-import docker
 import docker.errors
 import docker.models.containers
+
+import docker
 
 from ..config import get_git_user_email, get_git_user_name
 from ..session_runtime import session_branch_name, session_worktree_path
@@ -291,6 +292,30 @@ class ContainerManager:
         )
         logger.info("Reset /repos/%s to origin/%s", repo_id, default_branch)
 
+    def reset_checkout(self, workdir: str) -> None:
+        """Reset the current checkout without changing branches."""
+        self.exec("git reset --hard && git clean -fdx", workdir=workdir)
+        logger.info("Reset checkout %s", workdir)
+
+    def _sync_session_runtime_files(self, repo_id: str, worktree_path: str) -> None:
+        repo_root = f"/repos/{repo_id}"
+        self.exec(
+            f"if [ -f {repo_root}/CLAUDE.md ]; then cp {repo_root}/CLAUDE.md {worktree_path}/CLAUDE.md; fi"
+        )
+        self.exec(
+            "if [ -d {repo_root}/.claude ]; then "
+            "mkdir -p {worktree_path}/.claude && cp -R {repo_root}/.claude/. {worktree_path}/.claude/; "
+            "fi".format(repo_root=repo_root, worktree_path=worktree_path)
+        )
+        self.exec(
+            "if [ -e {worktree_path}/.codebase-graph ] || [ -L {worktree_path}/.codebase-graph ]; then "
+            "rm -rf {worktree_path}/.codebase-graph; "
+            "fi; "
+            "if [ -d {repo_root}/.codebase-graph ]; then "
+            "ln -s {repo_root}/.codebase-graph {worktree_path}/.codebase-graph; "
+            "fi".format(repo_root=repo_root, worktree_path=worktree_path)
+        )
+
     def ensure_session_worktree(self, repo_id: str, repo_url: str, session_id: str) -> str:
         """Ensure a dedicated git worktree exists for the runtime session."""
         self.ensure_repo(repo_id, repo_url)
@@ -298,6 +323,7 @@ class ContainerManager:
         branch_name = session_branch_name(session_id)
         exists = self.exec(f"test -d {worktree_path}/.git")
         if exists.exit_code == 0:
+            self._sync_session_runtime_files(repo_id, worktree_path)
             return worktree_path
 
         self.exec(f"mkdir -p /repos/.worktrees/{repo_id}")
@@ -308,6 +334,7 @@ class ContainerManager:
         )
         if result.exit_code != 0:
             raise RuntimeError(f"git worktree add failed:\n{result.combined}")
+        self._sync_session_runtime_files(repo_id, worktree_path)
         return worktree_path
 
     def remove_session_worktree(self, repo_id: str, session_id: str) -> None:

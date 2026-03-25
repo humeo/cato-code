@@ -11,6 +11,12 @@ from .codebase_graph_runtime import prepare_codebase_graph_runtime
 from .config import parse_repo_url
 from .github.commenter import failure_comment, post_issue_comment
 from .github.issue_fetcher import fetch_issue
+from .runtime_envelope import ActivityEnvelope, ActivityResultEnvelope, InvalidActivityResultEnvelope
+from .session_runtime import (
+    issue_number_from_trigger,
+    pr_number_from_trigger,
+    resolve_runtime_session_for_activity,
+)
 from .skill_renderer import (
     build_analyze_issue_prompt,
     build_fix_issue_prompt,
@@ -238,6 +244,10 @@ async def dispatch(
     repo_url = repo["repo_url"]
     refresh_step_started_at: str | None = None
     final_attempt_logs: list[dict] = []
+    runtime_session: dict | None = None
+    activity_workdir = f"/repos/{repo_id}"
+    supports_session_worktrees = hasattr(container_mgr, "ensure_session_worktree")
+    supports_reset_checkout = hasattr(container_mgr, "reset_checkout")
 
     logger.info("Dispatching activity %s (kind=%s, repo=%s)", activity_id, activity["kind"], repo_id)
 
@@ -317,13 +327,44 @@ async def dispatch(
                     summary = setup_activity["summary"]
                 raise RuntimeError(summary)
 
-        # 4. Reset repo to clean state (skip for respond_review — needs existing PR branch)
-        if activity["kind"] != "respond_review":
+        runtime_session = resolve_runtime_session_for_activity(
+            store,
+            repo_id=repo_id,
+            activity_kind=activity["kind"],
+            trigger=activity.get("trigger"),
+            existing_session_id=activity.get("session_id"),
+        )
+        if runtime_session is not None:
+            if supports_session_worktrees:
+                activity_workdir = container_mgr.ensure_session_worktree(repo_id, repo_url, runtime_session["id"])
+                store.update_runtime_session(
+                    runtime_session["id"],
+                    worktree_path=activity_workdir,
+                    last_activity_at=_now_iso(),
+                    status="active",
+                )
+            else:
+                activity_workdir = f"/repos/{repo_id}"
+                store.update_runtime_session(
+                    runtime_session["id"],
+                    worktree_path=activity_workdir,
+                    last_activity_at=_now_iso(),
+                    status="active",
+                )
+            if activity.get("session_id") != runtime_session["id"]:
+                store.update_activity(activity_id, session_id=runtime_session["id"])
+                activity = store.get_activity(activity_id) or activity
+            runtime_session = store.get_runtime_session(runtime_session["id"]) or runtime_session
+            if supports_reset_checkout:
+                container_mgr.reset_checkout(activity_workdir)
+            elif activity["kind"] != "respond_review":
+                container_mgr.reset_repo(repo_id)
+        elif activity["kind"] != "respond_review":
             container_mgr.reset_repo(repo_id)
 
         # 3.5. Index repo code definitions for non-issue flows that still use store-backed retrieval.
         try:
-            sha_result = container_mgr.exec("git rev-parse HEAD", workdir=f"/repos/{repo_id}")
+            sha_result = container_mgr.exec("git rev-parse HEAD", workdir=activity_workdir)
             current_sha = sha_result.stdout.strip() if sha_result.exit_code == 0 else None
             if activity["kind"] not in ("fix_issue", "analyze_issue"):
                 _index_repo_from_container(repo_id, container_mgr, store, current_sha)
@@ -332,13 +373,23 @@ async def dispatch(
 
         # 5. Build prompt based on activity kind
         prompt = await _build_prompt(activity, repo, github_token, store)
+        if runtime_session is not None:
+            prompt = _append_activity_envelope(
+                prompt,
+                _build_activity_envelope(
+                    activity=activity,
+                    repo=repo,
+                    runtime_session=runtime_session,
+                    max_turns=max_turns,
+                ),
+            )
 
         # 6. Update status to running
         store.update_activity(activity_id, status="running")
 
         # 7. Determine session resume for respond_review
-        resume_session_id = None
-        if activity["kind"] == "respond_review":
+        resume_session_id = runtime_session.get("sdk_session_id") if runtime_session is not None else None
+        if resume_session_id is None and activity["kind"] == "respond_review":
             resume_session_id = _find_original_session_id(activity, store)
 
         if activity["kind"] == "refresh_repo_memory_review":
@@ -352,13 +403,14 @@ async def dispatch(
             pre_attempt_log_count = len(store.get_logs(activity_id))
             if activity["kind"] in ("fix_issue", "analyze_issue", "refresh_repo_memory_review"):
                 try:
-                    prepare_codebase_graph_runtime(repo_id, container_mgr, store, repo_workdir=f"/repos/{repo_id}")
+                    prepare_codebase_graph_runtime(repo_id, container_mgr, store, repo_workdir=activity_workdir)
                 except Exception as e:
                     logger.debug("Codebase graph runtime prep skipped: %s", e)
             exit_code, session_id, cost_usd = await _execute_sdk_runner(
                 activity_id=activity_id,
                 repo_id=repo_id,
                 prompt=prompt,
+                cwd=activity_workdir,
                 store=store,
                 container_mgr=container_mgr,
                 max_turns=max_turns,
@@ -375,7 +427,12 @@ async def dispatch(
                 )
                 await asyncio.sleep(RETRY_DELAY_SECS)
                 # Reset repo to clean state before retry
-                if activity["kind"] != "respond_review":
+                if runtime_session is not None:
+                    if supports_reset_checkout:
+                        container_mgr.reset_checkout(activity_workdir)
+                    elif activity["kind"] != "respond_review":
+                        container_mgr.reset_repo(repo_id)
+                elif activity["kind"] != "respond_review":
                     container_mgr.reset_repo(repo_id)
             else:
                 logger.error(
@@ -385,6 +442,15 @@ async def dispatch(
         # 9. Extract summary from result line
         summary_logs = final_attempt_logs if activity["kind"] == "refresh_repo_memory_review" else store.get_logs(activity_id)
         summary = _extract_summary(summary_logs)
+        activity_result = _extract_activity_result_envelope(summary_logs)
+        if activity_result is not None:
+            summary = activity_result.summary
+            if cost_usd is None:
+                result_cost = activity_result.metrics.get("cost_usd")
+                cost_usd = float(result_cost) if isinstance(result_cost, (int, float)) else cost_usd
+            if runtime_session is not None:
+                merged_metadata = _merge_activity_metadata(activity, activity_result.to_dict())
+                store.update_activity(activity_id, metadata=merged_metadata)
         repo_memory_result_text = _extract_result_text(final_attempt_logs)
         repo_memory_decision = _extract_repo_memory_decision(repo_memory_result_text)
         if refresh_step_started_at is not None and exit_code == 0 and repo_memory_decision is None:
@@ -395,7 +461,15 @@ async def dispatch(
             repo_memory_reason = _extract_repo_memory_explanation(repo_memory_result_text)
             summary = repo_memory_reason or REPO_MEMORY_DEFAULT_SUMMARIES[repo_memory_decision]
 
+        if runtime_session is not None:
+            store.update_runtime_session(
+                runtime_session["id"],
+                sdk_session_id=session_id or runtime_session.get("sdk_session_id"),
+                last_activity_at=_now_iso(),
+            )
+
         # 10. Update final status and session_id for future resume
+        activity_session_ref = runtime_session["id"] if runtime_session is not None else session_id
         if exit_code == 0:
             if refresh_step_started_at is not None:
                 _finish_activity_step(store, activity_id, "review_repo_memory", refresh_step_started_at, "done")
@@ -413,7 +487,7 @@ async def dispatch(
                 activity_id,
                 status="done",
                 summary=summary,
-                session_id=session_id,
+                session_id=activity_session_ref,
                 cost_usd=cost_usd,
             )
             logger.info("Activity %s completed (cost=$%.4f)", activity_id, cost_usd or 0)
@@ -431,7 +505,7 @@ async def dispatch(
                 activity_id,
                 status="failed",
                 summary=summary,
-                session_id=session_id,
+                session_id=activity_session_ref,
                 cost_usd=cost_usd,
             )
             logger.warning("Activity %s failed after %d attempts", activity_id[:8], MAX_RETRIES)
@@ -576,6 +650,7 @@ async def _run_setup(
                 activity_id=activity_id,
                 repo_id=repo_id,
                 prompt=prompt,
+                cwd=repo_workdir,
                 store=store,
                 container_mgr=container_mgr,
                 max_turns=50,
@@ -908,7 +983,11 @@ def _find_original_session_id(activity: dict, store: Store) -> str | None:
     activities = store.list_activities(repo_id=activity["repo_id"])
     for a in reversed(list(activities)):
         if a["kind"] in ("fix_issue", "review_pr") and a["session_id"]:
-            logger.debug("Resuming session %s for respond_review", a["session_id"])
+            runtime_session = store.get_runtime_session(a["session_id"])
+            if runtime_session is not None and runtime_session.get("sdk_session_id"):
+                logger.debug("Resuming runtime session %s for respond_review", a["session_id"])
+                return runtime_session["sdk_session_id"]
+            logger.debug("Resuming legacy session %s for respond_review", a["session_id"])
             return a["session_id"]
     return None
 
@@ -917,6 +996,7 @@ async def _execute_sdk_runner(
     activity_id: str,
     repo_id: str,
     prompt: str,
+    cwd: str,
     store: Store,
     container_mgr: ContainerManager,
     max_turns: int,
@@ -931,7 +1011,6 @@ async def _execute_sdk_runner(
     - Idle timeout: IDLE_TIMEOUT_SECS seconds without any output
     - Hard timeout: HARD_TIMEOUT_SECS seconds absolute
     """
-    cwd = f"/repos/{repo_id}"
     line_count = 0
     exit_code = 1
     result_session_id: str | None = None
@@ -1010,6 +1089,111 @@ async def _execute_sdk_runner(
         await _flush_batch()
         logger.error("Activity %s hit hard timeout (%ds)", activity_id, HARD_TIMEOUT_SECS)
         raise
+
+
+def _build_activity_envelope(
+    activity: dict,
+    repo: dict,
+    runtime_session: dict,
+    max_turns: int,
+) -> ActivityEnvelope:
+    issue_number = issue_number_from_trigger(activity.get("trigger"))
+    pr_number = pr_number_from_trigger(activity.get("trigger"))
+    approval_required = bool(activity.get("requires_approval"))
+    approval_granted = not approval_required
+    return ActivityEnvelope(
+        activity={
+            "id": activity["id"],
+            "kind": activity["kind"],
+            "trigger": activity.get("trigger"),
+            "created_at": activity.get("created_at"),
+        },
+        repo={
+            "id": repo["id"],
+            "url": repo["repo_url"],
+            "default_branch": None,
+            "worktree_path": runtime_session["worktree_path"],
+        },
+        session={
+            "id": runtime_session["id"],
+            "sdk_session_id": runtime_session.get("sdk_session_id"),
+            "status": runtime_session["status"],
+            "entry_kind": runtime_session["entry_kind"],
+            "branch_name": runtime_session["branch_name"],
+            "worktree_path": runtime_session["worktree_path"],
+            "fork_from_session_id": runtime_session.get("fork_from_session_id"),
+        },
+        targets={
+            "issue_number": issue_number,
+            "pr_number": pr_number,
+            "comment_id": None,
+        },
+        approval={
+            "required": approval_required,
+            "granted": approval_granted,
+            "source": "/approve" if approval_granted else None,
+        },
+        event={
+            "trigger": activity.get("trigger"),
+        },
+        runtime={
+            "entrypoint": activity["kind"],
+            "model": "claude-agent-sdk",
+            "max_turns": max_turns,
+            "allowed_tools": ["Read", "Edit", "Write", "Grep", "Glob", "Bash", "Skill"],
+        },
+        observability={
+            "repo_id": repo["id"],
+            "activity_id": activity["id"],
+            "session_id": runtime_session["id"],
+        },
+    )
+
+
+def _append_activity_envelope(prompt: str, envelope: ActivityEnvelope) -> str:
+    envelope_json = json.dumps(envelope.to_dict(), indent=2, ensure_ascii=False)
+    return (
+        f"{prompt}\n\n---\n\n## Activity Envelope\n"
+        "```json\n"
+        f"{envelope_json}\n"
+        "```\n\n"
+        "When you finish, return an ActivityResultEnvelope JSON object as the final result text. "
+        "If you cannot provide every optional field, still return a valid JSON object with the required fields.\n"
+    )
+
+
+def _extract_activity_result_envelope(logs: list[dict]) -> ActivityResultEnvelope | None:
+    result_text = _extract_result_text(logs).strip()
+    if not result_text:
+        return None
+    candidates = [result_text]
+    fenced_match = re.search(r"```json\s*(\{.*\})\s*```", result_text, re.DOTALL)
+    if fenced_match:
+        candidates.insert(0, fenced_match.group(1))
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        try:
+            return ActivityResultEnvelope.from_dict(payload)
+        except InvalidActivityResultEnvelope:
+            continue
+    return None
+
+
+def _merge_activity_metadata(activity: dict, runtime_result: dict) -> str:
+    metadata: dict
+    raw_metadata = activity.get("metadata")
+    if raw_metadata:
+        try:
+            metadata = json.loads(raw_metadata)
+        except (TypeError, json.JSONDecodeError):
+            metadata = {}
+    else:
+        metadata = {}
+    metadata["runtime_result"] = runtime_result
+    return json.dumps(metadata)
 
 
 def _extract_summary(logs: list) -> str:

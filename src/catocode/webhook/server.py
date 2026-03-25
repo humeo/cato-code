@@ -16,6 +16,7 @@ from ..config import get_github_app_webhook_secret, parse_repo_url, repo_id_from
 from ..dashboard import make_router as make_dashboard_router
 from ..decision import decide_engagement
 from ..github.commenter import post_issue_comment
+from ..session_runtime import approval_scope_from_trigger, resolve_runtime_session_for_activity
 from ..store import Store
 from .parser import parse_webhook
 from .verifier import verify_signature
@@ -191,6 +192,7 @@ class WebhookServer:
             kind=decision.activity_kind or "",
             trigger=event.trigger,
         )
+        self._attach_runtime_session(activity_id)
 
         # Set approval requirement if needed
         if decision.requires_approval:
@@ -239,7 +241,7 @@ class WebhookServer:
         pending_approval = self._store.get_pending_approval_activities()
         matching_activity = None
         for activity in pending_approval:
-            if activity["trigger"] == issue_or_pr:
+            if approval_scope_from_trigger(activity.get("trigger")) == issue_or_pr:
                 matching_activity = activity
                 break
 
@@ -377,6 +379,7 @@ class WebhookServer:
             return JSONResponse({"status": "approved"})
 
         activity_id = self._store.add_activity(repo_id, decision.activity_kind or "", event.trigger)
+        self._attach_runtime_session(activity_id)
         if decision.requires_approval:
             self._store.update_activity(activity_id, requires_approval=1)
             # For task activities, immediately post a comment so the user knows approval is needed
@@ -429,8 +432,25 @@ class WebhookServer:
                 repo_id,
             )
             return "duplicate_inflight"
+        self._attach_runtime_session(activity_id)
         logger.info("Queued repo memory refresh for merged PR #%s in %s", pr_number, repo_id)
         return "queued_repo_memory_refresh"
+
+    def _attach_runtime_session(self, activity_id: str) -> None:
+        activity = self._store.get_activity(activity_id)
+        if activity is None:
+            return
+        session = resolve_runtime_session_for_activity(
+            self._store,
+            repo_id=activity["repo_id"],
+            activity_kind=activity["kind"],
+            trigger=activity.get("trigger"),
+            existing_session_id=activity.get("session_id"),
+        )
+        if session is None:
+            return
+        if activity.get("session_id") != session["id"]:
+            self._store.update_activity(activity_id, session_id=session["id"])
 
     async def _handle_patrol_side_effects(
         self, event_type: str, payload: dict[str, Any], repo_id: str

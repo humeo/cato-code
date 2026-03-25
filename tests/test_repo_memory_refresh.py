@@ -207,7 +207,9 @@ async def test_refresh_repo_memory_review_prepares_cg_before_runner(store, monke
     )
 
     assert "cg stats --root ." in container_mgr.commands
-    assert container_mgr.runner_calls == ["refresh prompt"]
+    assert len(container_mgr.runner_calls) == 1
+    assert container_mgr.runner_calls[0].startswith("refresh prompt")
+    assert "## Activity Envelope" in container_mgr.runner_calls[0]
 
     steps = store.list_activity_steps(activity_id)
     assert [step["step_key"] for step in steps] == ["review_repo_memory", "skip_update"]

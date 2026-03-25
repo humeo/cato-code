@@ -43,6 +43,18 @@ def test_ensure_session_worktree_creates_branch_and_worktree(monkeypatch):
         ("mkdir -p /repos/.worktrees/owner-repo", "/repos"),
         ("git fetch origin", "/repos/owner-repo"),
         ("git worktree add /repos/.worktrees/owner-repo/session-123 -b catocode/session/session-123", "/repos/owner-repo"),
+        (
+            "if [ -f /repos/owner-repo/CLAUDE.md ]; then cp /repos/owner-repo/CLAUDE.md /repos/.worktrees/owner-repo/session-123/CLAUDE.md; fi",
+            "/repos",
+        ),
+        (
+            "if [ -d /repos/owner-repo/.claude ]; then mkdir -p /repos/.worktrees/owner-repo/session-123/.claude && cp -R /repos/owner-repo/.claude/. /repos/.worktrees/owner-repo/session-123/.claude/; fi",
+            "/repos",
+        ),
+        (
+            "if [ -e /repos/.worktrees/owner-repo/session-123/.codebase-graph ] || [ -L /repos/.worktrees/owner-repo/session-123/.codebase-graph ]; then rm -rf /repos/.worktrees/owner-repo/session-123/.codebase-graph; fi; if [ -d /repos/owner-repo/.codebase-graph ]; then ln -s /repos/owner-repo/.codebase-graph /repos/.worktrees/owner-repo/session-123/.codebase-graph; fi",
+            "/repos",
+        ),
     ]
 
 

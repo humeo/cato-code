@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from ..session_runtime import approval_scope_from_trigger
 from ..store import Store
 from .parser import WebhookEvent
 
@@ -109,7 +110,7 @@ async def decide_engagement(
                 pending_approval = store.get_pending_approval_activities()
 
                 for activity in pending_approval:
-                    if activity["trigger"] == issue_or_pr:
+                    if approval_scope_from_trigger(activity.get("trigger")) == issue_or_pr:
                         # Found matching activity waiting for approval
                         return EngagementDecision(
                             should_engage=True,

@@ -654,6 +654,8 @@ class Store:
 
     def create_runtime_session(
         self,
+        session_id: str | None = None,
+        *,
         repo_id: str,
         entry_kind: str,
         status: str,
@@ -664,7 +666,7 @@ class Store:
         sdk_session_id: str | None = None,
         fork_from_session_id: str | None = None,
     ) -> str:
-        session_id = str(uuid.uuid4())
+        session_id = session_id or str(uuid.uuid4())
         now = _now()
         self._db.execute(
             """INSERT INTO runtime_sessions (
