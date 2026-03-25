@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import AsyncMock
 
@@ -192,3 +193,42 @@ async def test_refresh_repo_memory_review_failure_keeps_repo_ready(store, monkey
     assert review_step["status"] == "failed"
     assert store.get_activity_step(activity_id, "update_claude_md") is None
     assert store.get_activity_step(activity_id, "skip_update") is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_repo_memory_review_timeout_closes_running_step(store, monkeypatch):
+    from catocode.dispatcher import dispatch
+
+    repo_id, activity_id = _seed_ready_repo(store)
+    container_mgr = ReadyRefreshContainerManager()
+
+    monkeypatch.setattr("catocode.dispatcher._build_prompt", AsyncMock(return_value="refresh prompt"))
+    monkeypatch.setattr("catocode.dispatcher._index_repo_from_container", lambda *args, **kwargs: None)
+
+    async def fake_execute_sdk_runner(**kwargs):
+        raise asyncio.TimeoutError("runner stalled")
+
+    monkeypatch.setattr("catocode.dispatcher._execute_sdk_runner", fake_execute_sdk_runner)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await dispatch(
+            activity_id=activity_id,
+            store=store,
+            container_mgr=container_mgr,
+            anthropic_api_key="sk-ant",
+            github_token="ghp-token",
+            verbose=False,
+        )
+
+    activity = store.get_activity(activity_id)
+    repo = store.get_repo(repo_id)
+    review_step = store.get_activity_step(activity_id, "review_repo_memory")
+
+    assert activity is not None
+    assert activity["status"] == "failed"
+    assert activity["summary"] == "Timeout: activity exceeded time limit"
+    assert repo is not None
+    assert repo["lifecycle_status"] == "ready"
+    assert review_step is not None
+    assert review_step["status"] == "failed"
+    assert review_step["reason"] == "Timeout: activity exceeded time limit"

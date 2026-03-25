@@ -227,6 +227,7 @@ async def dispatch(
 
     repo_id = repo["id"]
     repo_url = repo["repo_url"]
+    refresh_step_started_at: str | None = None
 
     logger.info("Dispatching activity %s (kind=%s, repo=%s)", activity_id, activity["kind"], repo_id)
 
@@ -330,7 +331,6 @@ async def dispatch(
         if activity["kind"] == "respond_review":
             resume_session_id = _find_original_session_id(activity, store)
 
-        refresh_step_started_at: str | None = None
         if activity["kind"] == "refresh_repo_memory_review":
             refresh_step_started_at = _start_activity_step(store, activity_id, "review_repo_memory")
 
@@ -411,6 +411,7 @@ async def dispatch(
 
     except asyncio.TimeoutError:
         summary = "Timeout: activity exceeded time limit"
+        _fail_refresh_review_step(store, activity_id, refresh_step_started_at, summary)
         store.update_activity(activity_id, status="failed", summary=summary)
         if activity["kind"] == "setup":
             store.update_repo_lifecycle(
@@ -424,6 +425,7 @@ async def dispatch(
         raise
     except Exception as e:
         summary = f"Error: {e}"
+        _fail_refresh_review_step(store, activity_id, refresh_step_started_at, summary)
         store.update_activity(activity_id, status="failed", summary=summary)
         if activity["kind"] == "setup":
             store.update_repo_lifecycle(
@@ -435,6 +437,27 @@ async def dispatch(
         logger.exception("Activity %s failed with exception", activity_id)
         await _notify_failure(activity, repo, github_token, summary)
         raise
+
+
+def _fail_refresh_review_step(
+    store: "Store",
+    activity_id: str,
+    started_at: str | None,
+    reason: str,
+) -> None:
+    if started_at is None:
+        return
+    step = store.get_activity_step(activity_id, "review_repo_memory")
+    if step is None or step.get("status") != "running":
+        return
+    _finish_activity_step(
+        store,
+        activity_id,
+        "review_repo_memory",
+        started_at,
+        "failed",
+        reason=reason,
+    )
 
 
 async def _notify_failure(
