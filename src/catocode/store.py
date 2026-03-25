@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -225,6 +226,40 @@ CREATE TABLE IF NOT EXISTS runtime_session_pr_links (
     FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
 );
 
+CREATE TABLE IF NOT EXISTS runtime_session_hypotheses (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    summary TEXT,
+    status TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_session_todos (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    content TEXT,
+    status TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_session_checkpoints (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    label TEXT,
+    status TEXT,
+    commit_sha TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_code_defs_repo_name ON code_definitions(repo_id, symbol_name);
 CREATE INDEX IF NOT EXISTS idx_code_defs_repo_file ON code_definitions(repo_id, file_path);
 CREATE INDEX IF NOT EXISTS idx_runtime_sessions_repo_status ON runtime_sessions(repo_id, status, created_at);
@@ -307,6 +342,37 @@ WHERE kind = 'refresh_repo_memory_review' AND status IN ('pending', 'running')""
     "CREATE INDEX IF NOT EXISTS idx_runtime_sessions_repo_status ON runtime_sessions(repo_id, status, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_runtime_session_issue_repo_issue ON runtime_session_issue_links(repo_id, issue_number, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_runtime_session_pr_repo_pr ON runtime_session_pr_links(repo_id, pr_number, created_at)",
+    """CREATE TABLE IF NOT EXISTS runtime_session_hypotheses (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    summary TEXT,
+    status TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+)""",
+    """CREATE TABLE IF NOT EXISTS runtime_session_todos (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    content TEXT,
+    status TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+)""",
+    """CREATE TABLE IF NOT EXISTS runtime_session_checkpoints (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    label TEXT,
+    status TEXT,
+    commit_sha TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+)""",
     "ALTER TABLE runtime_sessions ADD COLUMN gc_error TEXT",
     "ALTER TABLE runtime_sessions ADD COLUMN resolution_state TEXT",
     "ALTER TABLE runtime_session_pr_links ADD COLUMN pr_state TEXT NOT NULL DEFAULT 'open'",
@@ -840,6 +906,102 @@ class Store:
             gc_error=gc_error,
             last_activity_at=terminal_at,
         )
+
+    def replace_runtime_session_resolution(self, session_id: str, resolution: dict) -> None:
+        hypotheses = resolution.get("hypotheses", [])
+        todos = resolution.get("todos", [])
+        checkpoints = resolution.get("checkpoints", [])
+
+        self._db.execute("DELETE FROM runtime_session_hypotheses WHERE session_id = ?", (session_id,))
+        self._db.execute("DELETE FROM runtime_session_todos WHERE session_id = ?", (session_id,))
+        self._db.execute("DELETE FROM runtime_session_checkpoints WHERE session_id = ?", (session_id,))
+
+        for index, item in enumerate(hypotheses):
+            payload = json.dumps(item)
+            self._db.execute(
+                """INSERT INTO runtime_session_hypotheses
+                   (session_id, item_order, item_id, summary, status, payload)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    index,
+                    str(item.get("id") or f"hypothesis-{index}"),
+                    item.get("summary"),
+                    item.get("status"),
+                    payload,
+                ),
+            )
+
+        for index, item in enumerate(todos):
+            payload = json.dumps(item)
+            self._db.execute(
+                """INSERT INTO runtime_session_todos
+                   (session_id, item_order, item_id, content, status, payload)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    index,
+                    str(item.get("id") or f"todo-{index}"),
+                    item.get("content"),
+                    item.get("status"),
+                    payload,
+                ),
+            )
+
+        for index, item in enumerate(checkpoints):
+            payload = json.dumps(item)
+            self._db.execute(
+                """INSERT INTO runtime_session_checkpoints
+                   (session_id, item_order, item_id, label, status, commit_sha, payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    index,
+                    str(item.get("id") or f"checkpoint-{index}"),
+                    item.get("label"),
+                    item.get("status"),
+                    item.get("commit_sha"),
+                    payload,
+                ),
+            )
+
+        self.update_runtime_session(session_id, resolution_state=json.dumps(resolution))
+
+    def list_runtime_session_hypotheses(self, session_id: str) -> list[dict]:
+        rows = self._db.execute(
+            "SELECT payload FROM runtime_session_hypotheses WHERE session_id = ? ORDER BY item_order",
+            (session_id,),
+        )
+        return [json.loads(row["payload"]) for row in rows]
+
+    def list_runtime_session_todos(self, session_id: str) -> list[dict]:
+        rows = self._db.execute(
+            "SELECT payload FROM runtime_session_todos WHERE session_id = ? ORDER BY item_order",
+            (session_id,),
+        )
+        return [json.loads(row["payload"]) for row in rows]
+
+    def list_runtime_session_checkpoints(self, session_id: str) -> list[dict]:
+        rows = self._db.execute(
+            "SELECT payload FROM runtime_session_checkpoints WHERE session_id = ? ORDER BY item_order",
+            (session_id,),
+        )
+        return [json.loads(row["payload"]) for row in rows]
+
+    def get_latest_runtime_session_checkpoint(self, session_id: str) -> dict | None:
+        row = self._db.execute_one(
+            """SELECT payload
+               FROM runtime_session_checkpoints
+               WHERE session_id = ?
+                 AND status = 'done'
+                 AND commit_sha IS NOT NULL
+               ORDER BY item_order DESC
+               LIMIT 1""",
+            (session_id,),
+        )
+        if row is None:
+            return None
+        return json.loads(row["payload"])
 
     def list_activities(self, repo_id: str | None = None, user_id: str | None = None) -> list[dict]:
         if repo_id is not None:

@@ -128,3 +128,63 @@ def test_update_runtime_session_persists_resolution_state(store):
     assert session["resolution_state"] == (
         '{"hypotheses":[{"id":"h1","summary":"Null guard","status":"active"}]}'
     )
+
+
+def test_replace_runtime_session_resolution_persists_structured_records(store):
+    store.add_repo("owner-repo", "https://github.com/owner/repo")
+    session_id = store.create_runtime_session(
+        repo_id="owner-repo",
+        entry_kind="fix_issue",
+        status="active",
+        worktree_path="/repos/.worktrees/owner-repo/session-structured",
+        branch_name="catocode/session/session-structured",
+        issue_number=42,
+    )
+
+    store.replace_runtime_session_resolution(
+        session_id,
+        {
+            "hypotheses": [{"id": "h1", "summary": "Guard null input", "status": "active"}],
+            "todos": [{"id": "t1", "content": "Reproduce null input failure", "status": "done"}],
+            "checkpoints": [{"id": "c1", "label": "before-fix", "status": "done", "commit_sha": "abc123"}],
+        },
+    )
+
+    assert store.list_runtime_session_hypotheses(session_id) == [
+        {"id": "h1", "summary": "Guard null input", "status": "active"}
+    ]
+    assert store.list_runtime_session_todos(session_id) == [
+        {"id": "t1", "content": "Reproduce null input failure", "status": "done"}
+    ]
+    assert store.list_runtime_session_checkpoints(session_id) == [
+        {"id": "c1", "label": "before-fix", "status": "done", "commit_sha": "abc123"}
+    ]
+
+
+def test_get_latest_runtime_session_checkpoint_returns_latest_successful_checkpoint(store):
+    store.add_repo("owner-repo", "https://github.com/owner/repo")
+    session_id = store.create_runtime_session(
+        repo_id="owner-repo",
+        entry_kind="fix_issue",
+        status="active",
+        worktree_path="/repos/.worktrees/owner-repo/session-checkpoints",
+        branch_name="catocode/session/session-checkpoints",
+        issue_number=42,
+    )
+
+    store.replace_runtime_session_resolution(
+        session_id,
+        {
+            "hypotheses": [],
+            "todos": [],
+            "checkpoints": [
+                {"id": "c1", "label": "before-fix", "status": "done", "commit_sha": "abc123"},
+                {"id": "c2", "label": "broken-attempt", "status": "failed", "commit_sha": "def456"},
+                {"id": "c3", "label": "after-fix", "status": "done", "commit_sha": "ghi789"},
+            ],
+        },
+    )
+
+    checkpoint = store.get_latest_runtime_session_checkpoint(session_id)
+
+    assert checkpoint == {"id": "c3", "label": "after-fix", "status": "done", "commit_sha": "ghi789"}
