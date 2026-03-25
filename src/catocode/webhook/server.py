@@ -139,10 +139,16 @@ class WebhookServer:
             delivery_id=x_github_delivery,
             repo_id=repo_id,
         )
+        queued_repo_memory_refresh = self._queue_merged_pr_repo_memory_refresh(repo_id, payload)
 
         if event is None:
             logger.debug("Webhook event ignored: %s for repo %s", x_github_event, repo_id)
             self._store.mark_webhook_event_processed(x_github_delivery)
+            if queued_repo_memory_refresh:
+                return JSONResponse({
+                    "status": "queued_repo_memory_refresh",
+                    "event_type": x_github_event,
+                })
             return JSONResponse({"status": "ignored", "event_type": x_github_event})
 
         # Make engagement decision
@@ -340,8 +346,11 @@ class WebhookServer:
             payload=json.dumps(payload),
         )
         event = parse_webhook(x_github_event, payload, x_github_delivery, repo_id)
+        queued_repo_memory_refresh = self._queue_merged_pr_repo_memory_refresh(repo_id, payload)
         if event is None:
             self._store.mark_webhook_event_processed(x_github_delivery)
+            if queued_repo_memory_refresh:
+                return JSONResponse({"status": "queued_repo_memory_refresh", "event_type": x_github_event})
             return JSONResponse({"status": "ignored", "event_type": x_github_event})
 
         decision = await decide_engagement(event, repo, self._store)
@@ -370,6 +379,40 @@ class WebhookServer:
 
         self._store.mark_webhook_event_processed(x_github_delivery)
         return JSONResponse({"status": "created", "activity_id": activity_id, "activity_kind": decision.activity_kind})
+
+    def _queue_merged_pr_repo_memory_refresh(self, repo_id: str, payload: dict[str, Any]) -> bool:
+        """Queue repo memory refresh work for merged PR closures."""
+        if payload.get("action") != "closed":
+            return False
+
+        pull_request = payload.get("pull_request", {})
+        if not pull_request.get("merged"):
+            return False
+
+        sender = payload.get("sender", {})
+        sender_login = sender.get("login", "unknown")
+        sender_type = sender.get("type", "")
+        if sender_type == "Bot" or sender_login.endswith("[bot]"):
+            return False
+
+        pr_number = pull_request.get("number")
+        merge_commit_sha = pull_request.get("merge_commit_sha")
+        title = pull_request.get("title", "")
+        if pr_number is None or not merge_commit_sha:
+            return False
+
+        self._store.add_activity(
+            repo_id=repo_id,
+            kind="refresh_repo_memory_review",
+            trigger=f"repo_memory_refresh:pr:{pr_number}",
+            metadata={
+                "pr_number": pr_number,
+                "merge_commit_sha": merge_commit_sha,
+                "title": title,
+            },
+        )
+        logger.info("Queued repo memory refresh for merged PR #%s in %s", pr_number, repo_id)
+        return True
 
     async def _handle_patrol_side_effects(
         self, event_type: str, payload: dict[str, Any], repo_id: str
@@ -574,4 +617,3 @@ class WebhookServer:
 
         self._store.mark_webhook_event_processed(delivery_id)
         return {"status": "repositories_updated", "watched": watched, "unwatched": unwatched}
-
