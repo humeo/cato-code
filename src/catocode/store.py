@@ -393,6 +393,19 @@ class Store:
             "SELECT * FROM activities WHERE status = 'running' ORDER BY created_at"
         )
 
+    def has_inflight_activity(self, repo_id: str, kind: str, trigger: str) -> bool:
+        row = self._db.execute_one(
+            """SELECT 1 as found
+               FROM activities
+               WHERE repo_id = ?
+                 AND kind = ?
+                 AND trigger = ?
+                 AND status IN ('pending', 'running')
+               LIMIT 1""",
+            (repo_id, kind, trigger),
+        )
+        return bool(row)
+
     def upsert_activity_step(
         self,
         activity_id: str,

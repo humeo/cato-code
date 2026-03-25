@@ -117,6 +117,41 @@ def test_bot_merged_pr_webhook_queues_repo_memory_refresh(tmp_path: Path):
     assert metadata["title"] == "Ship new workflow"
 
 
+def test_same_merged_pr_across_both_webhook_entrypoints_queues_one_refresh_activity(tmp_path: Path):
+    store = Store(db_path=tmp_path / "test.db")
+    store.add_repo("owner-repo", "https://github.com/owner/repo")
+    store.update_repo("owner-repo", watch=1)
+    client = _make_client(store)
+
+    payload = _merged_pr_payload()
+
+    github_resp = client.post(
+        "/webhook/github/owner-repo",
+        content=json.dumps(payload).encode(),
+        headers={
+            "X-GitHub-Event": "pull_request",
+            "X-GitHub-Delivery": "delivery-merged-github-1",
+            "Content-Type": "application/json",
+        },
+    )
+    app_resp = client.post(
+        "/webhook/app",
+        content=json.dumps(payload).encode(),
+        headers={
+            "X-GitHub-Event": "pull_request",
+            "X-GitHub-Delivery": "delivery-merged-app-2",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert github_resp.status_code == 200
+    assert app_resp.status_code == 200
+
+    activities = store.list_activities("owner-repo")
+    assert [a["kind"] for a in activities] == ["refresh_repo_memory_review"]
+    assert activities[0]["trigger"] == "repo_memory_refresh:pr:42"
+
+
 def test_non_pull_request_event_with_pr_payload_does_not_queue_repo_memory_refresh(
     tmp_path: Path,
 ):

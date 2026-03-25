@@ -159,7 +159,15 @@ async def test_refresh_repo_memory_review_prepares_cg_before_runner(store, monke
         container_mgr.runner_calls.append(kwargs["prompt"])
         store.add_log(
             kwargs["activity_id"],
-            json.dumps({"type": "result", "result": f"{'x' * 600}\nREPO_MEMORY_DECISION: skip_update"}),
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": (
+                        "No CLAUDE.md changes needed after reviewing merged PR #42.\n"
+                        "REPO_MEMORY_DECISION: skip_update"
+                    ),
+                }
+            ),
         )
         return 0, "session-123", 0.25
 
@@ -181,6 +189,7 @@ async def test_refresh_repo_memory_review_prepares_cg_before_runner(store, monke
     assert [step["step_key"] for step in steps] == ["review_repo_memory", "skip_update"]
     assert steps[0]["status"] == "done"
     assert steps[1]["status"] == "done"
+    assert steps[1]["reason"] == "No CLAUDE.md changes needed after reviewing merged PR #42."
 
 
 @pytest.mark.asyncio
@@ -196,7 +205,15 @@ async def test_refresh_repo_memory_review_records_update_claude_md_step(store, m
     async def fake_execute_sdk_runner(**kwargs):
         store.add_log(
             kwargs["activity_id"],
-            json.dumps({"type": "result", "result": f"{'x' * 600}\nREPO_MEMORY_DECISION: update_claude_md"}),
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": (
+                        "Update CLAUDE.md with the new repo memory from merged PR #42.\n"
+                        "REPO_MEMORY_DECISION: update_claude_md"
+                    ),
+                }
+            ),
         )
         return 0, "session-456", 0.5
 
@@ -214,6 +231,58 @@ async def test_refresh_repo_memory_review_records_update_claude_md_step(store, m
     steps = store.list_activity_steps(activity_id)
     assert [step["step_key"] for step in steps] == ["review_repo_memory", "update_claude_md"]
     assert all(step["status"] == "done" for step in steps)
+    assert steps[1]["reason"] == "Update CLAUDE.md with the new repo memory from merged PR #42."
+
+    activity = store.get_activity(activity_id)
+    assert activity is not None
+    assert activity["summary"] == "Update CLAUDE.md with the new repo memory from merged PR #42."
+    assert "REPO_MEMORY_DECISION:" not in activity["summary"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_repo_memory_review_skip_update_summary_omits_marker_and_persists_reason(store, monkeypatch):
+    from catocode.dispatcher import dispatch
+
+    _repo_id, activity_id = _seed_ready_repo(store)
+    container_mgr = ReadyRefreshContainerManager()
+
+    monkeypatch.setattr("catocode.dispatcher._build_prompt", AsyncMock(return_value="refresh prompt"))
+    monkeypatch.setattr("catocode.dispatcher._index_repo_from_container", lambda *args, **kwargs: None)
+
+    async def fake_execute_sdk_runner(**kwargs):
+        store.add_log(
+            kwargs["activity_id"],
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": (
+                        "No CLAUDE.md changes needed after reviewing merged PR #42.\n"
+                        "REPO_MEMORY_DECISION: skip_update"
+                    ),
+                }
+            ),
+        )
+        return 0, "session-789", 0.15
+
+    monkeypatch.setattr("catocode.dispatcher._execute_sdk_runner", fake_execute_sdk_runner)
+
+    await dispatch(
+        activity_id=activity_id,
+        store=store,
+        container_mgr=container_mgr,
+        anthropic_api_key="sk-ant",
+        github_token="ghp-token",
+        verbose=False,
+    )
+
+    activity = store.get_activity(activity_id)
+    skip_step = store.get_activity_step(activity_id, "skip_update")
+
+    assert activity is not None
+    assert activity["summary"] == "No CLAUDE.md changes needed after reviewing merged PR #42."
+    assert "REPO_MEMORY_DECISION:" not in activity["summary"]
+    assert skip_step is not None
+    assert skip_step["reason"] == "No CLAUDE.md changes needed after reviewing merged PR #42."
 
 
 @pytest.mark.asyncio

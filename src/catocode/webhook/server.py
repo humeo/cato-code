@@ -416,10 +416,19 @@ class WebhookServer:
         if pr_number is None or not merge_commit_sha:
             return False
 
+        trigger = f"repo_memory_refresh:pr:{pr_number}"
+        if self._store.has_inflight_activity(repo_id, "refresh_repo_memory_review", trigger):
+            logger.info(
+                "Skipped duplicate repo memory refresh for merged PR #%s in %s",
+                pr_number,
+                repo_id,
+            )
+            return True
+
         self._store.add_activity(
             repo_id=repo_id,
             kind="refresh_repo_memory_review",
-            trigger=f"repo_memory_refresh:pr:{pr_number}",
+            trigger=trigger,
             metadata={
                 "pr_number": pr_number,
                 "merge_commit_sha": merge_commit_sha,
