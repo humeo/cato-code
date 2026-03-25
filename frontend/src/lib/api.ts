@@ -44,6 +44,25 @@ export async function deleteRepo(repoId: string): Promise<boolean> {
   }
 }
 
+export async function retrySetup(
+  repoId: string
+): Promise<{ activity_id: string } | { error: string } | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/repos/${repoId}/setup/retry`, { method: "POST" });
+    if (!res.ok) {
+      try {
+        const body = await res.json();
+        return { error: body.detail ?? `HTTP ${res.status}` };
+      } catch {
+        return { error: `HTTP ${res.status}` };
+      }
+    }
+    return res.json();
+  } catch {
+    return { error: "Network error" };
+  }
+}
+
 export async function getActivity(activityId: string): Promise<Activity | null> {
   return apiFetch<Activity>(`/api/activities/${activityId}`);
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { deleteRepo, updatePatrolSettings, triggerPatrol } from "@/lib/api";
+import { deleteRepo, retrySetup, updatePatrolSettings, triggerPatrol } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { Repo } from "@/lib/types";
 
@@ -127,6 +127,7 @@ function PatrolPanel({ repo }: { repo: Repo }) {
 export function RepoList({ repos: initialRepos }: RepoListProps) {
   const [repos, setRepos] = useState(initialRepos);
   const [pendingDelete, setPendingDelete] = useState<Repo | null>(null);
+  const [retryingRepoId, setRetryingRepoId] = useState<string | null>(null);
 
   useEffect(() => {
     setRepos(initialRepos);
@@ -134,6 +135,29 @@ export function RepoList({ repos: initialRepos }: RepoListProps) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedPatrol, setExpandedPatrol] = useState<string | null>(null);
+
+  const handleRetrySetup = useCallback(async (repoId: string) => {
+    setRetryingRepoId(repoId);
+    setError(null);
+    const result = await retrySetup(repoId);
+    setRetryingRepoId(null);
+    if (!result || "error" in result) {
+      setError(result?.error ?? "Failed to retry setup.");
+      return;
+    }
+    setRepos((prev) =>
+      prev.map((repo) =>
+        repo.id === repoId
+          ? {
+              ...repo,
+              lifecycle_status: "setting_up",
+              last_error: null,
+              last_setup_activity_id: result.activity_id,
+            }
+          : repo
+      )
+    );
+  }, []);
 
   const handleConfirmDelete = useCallback(async () => {
     if (!pendingDelete) return;
@@ -173,6 +197,16 @@ export function RepoList({ repos: initialRepos }: RepoListProps) {
         {repos.map((r) => {
           const shortName = r.repo_url.replace("https://github.com/", "");
           const patrolExpanded = expandedPatrol === r.id;
+          const isRetryingSetup = retryingRepoId === r.id;
+          const lifecycle = r.lifecycle_status ?? (r.watch ? "ready" : "watched");
+          const lifecycleStyle =
+            lifecycle === "ready"
+              ? "text-emerald-400 bg-emerald-400/10"
+              : lifecycle === "setting_up"
+                ? "text-blue-400 bg-blue-400/10"
+                : lifecycle === "error"
+                  ? "text-red-400 bg-red-400/10"
+                  : "text-gray-500 bg-gray-500/10";
           return (
             <div key={r.id} className="py-1">
               <div
@@ -192,14 +226,20 @@ export function RepoList({ repos: initialRepos }: RepoListProps) {
                   {shortName}
                 </a>
                 <span
-                  className={`ml-auto text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${
-                    r.watch
-                      ? "text-emerald-400 bg-emerald-400/10"
-                      : "text-gray-500 bg-gray-500/10"
-                  }`}
+                  className={`ml-auto text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${lifecycleStyle}`}
                 >
-                  {r.watch ? "watching" : "paused"}
+                  {lifecycle.replace("_", " ")}
                 </span>
+                {lifecycle === "error" && (
+                  <button
+                    onClick={() => handleRetrySetup(r.id)}
+                    disabled={isRetryingSetup}
+                    className="opacity-0 group-hover:opacity-100 text-xs px-2 py-0.5 rounded transition-all flex-shrink-0 text-amber-300 bg-amber-400/10 hover:bg-amber-400/20 disabled:opacity-50"
+                    title="Retry setup"
+                  >
+                    {isRetryingSetup ? "retrying…" : "retry setup"}
+                  </button>
+                )}
                 {/* Patrol toggle button */}
                 <button
                   onClick={() => setExpandedPatrol(patrolExpanded ? null : r.id)}
@@ -222,6 +262,26 @@ export function RepoList({ repos: initialRepos }: RepoListProps) {
                   </svg>
                 </button>
               </div>
+              {(r.last_error || lifecycle === "setting_up") && (
+                <div className="ml-5 mr-1 rounded-lg border border-white/5 bg-black/15 px-3 py-2 text-[11px] text-gray-400">
+                  {lifecycle === "setting_up" && (
+                    <div className="flex items-center gap-2 text-blue-300">
+                      <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+                      setup running: clone, CLAUDE.md init, `cg index`, health check
+                    </div>
+                  )}
+                  {r.last_error && (
+                    <div className="mt-1 text-red-300/90">
+                      last setup error: {r.last_error}
+                    </div>
+                  )}
+                  {r.last_ready_at && lifecycle === "ready" && (
+                    <div className="mt-1 text-gray-500">
+                      ready since {new Date(r.last_ready_at).toLocaleString()}
+                    </div>
+                  )}
+                </div>
+              )}
               {patrolExpanded && <PatrolPanel repo={r} />}
             </div>
           );

@@ -37,6 +37,34 @@ def _enrich_activity(activity: dict) -> dict:
     return a
 
 
+def _serialize_activity(activity: dict, store: Store, *, include_detail: bool = False) -> dict:
+    payload = _enrich_activity(activity)
+    raw_metadata = payload.get("metadata")
+    runtime_result = None
+    if raw_metadata:
+        try:
+            metadata = json.loads(raw_metadata)
+            runtime_result = metadata.get("runtime_result")
+        except (TypeError, json.JSONDecodeError):
+            runtime_result = None
+    payload["runtime_result"] = runtime_result
+    if include_detail:
+        session = store.get_runtime_session(payload["session_id"]) if payload.get("session_id") else None
+        payload["runtime_session"] = dict(session) if session is not None else None
+        payload["steps"] = [dict(step) for step in store.list_activity_steps(payload["id"])]
+    return payload
+
+
+def _find_reusable_setup_activity(store: Store, repo_id: str) -> dict | None:
+    for activity in reversed(store.list_activities(repo_id=repo_id)):
+        if activity["kind"] != "setup":
+            continue
+        if activity["status"] not in {"pending", "running"}:
+            continue
+        return activity
+    return None
+
+
 def make_router(store: Store) -> APIRouter:
     """Return an APIRouter with the store injected via closure."""
     r = APIRouter(tags=["api"])
@@ -68,7 +96,36 @@ def make_router(store: Store) -> APIRouter:
         # Ownership check
         if stats["repo"].get("user_id") != current_user["id"]:
             raise HTTPException(status_code=403, detail="Access denied")
+        stats["runtime_sessions"] = [dict(session) for session in store.list_repo_runtime_sessions(repo_id)]
+        last_setup_activity_id = stats["repo"].get("last_setup_activity_id")
+        stats["last_setup_activity"] = (
+            dict(store.get_activity(last_setup_activity_id))
+            if last_setup_activity_id and store.get_activity(last_setup_activity_id)
+            else None
+        )
         return stats
+
+    @r.post("/repos/{repo_id}/setup/retry")
+    async def retry_setup(repo_id: str, current_user: CurrentUser) -> dict:
+        repo = store.get_repo(repo_id)
+        if repo is None:
+            raise HTTPException(status_code=404, detail="Repo not found")
+        if repo.get("user_id") != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        setup_activity = _find_reusable_setup_activity(store, repo_id)
+        if setup_activity is None:
+            activity_id = store.add_activity(repo_id, "setup", "retry_setup")
+        else:
+            activity_id = setup_activity["id"]
+
+        store.update_repo_lifecycle(
+            repo_id,
+            lifecycle_status="setting_up",
+            last_error=None,
+            last_setup_activity_id=activity_id,
+        )
+        return {"status": "queued", "activity_id": activity_id}
 
     @r.get("/repos/{repo_id}/activities")
     async def list_repo_activities(repo_id: str, current_user: CurrentUser) -> list[dict]:
@@ -77,11 +134,11 @@ def make_router(store: Store) -> APIRouter:
             raise HTTPException(status_code=404, detail="Repo not found")
         if repo.get("user_id") != current_user["id"]:
             raise HTTPException(status_code=403, detail="Access denied")
-        return [_enrich_activity(a) for a in store.list_activities(repo_id=repo_id)]
+        return [_serialize_activity(a, store) for a in store.list_activities(repo_id=repo_id)]
 
     @r.get("/activities")
     async def list_activities(current_user: CurrentUser) -> list[dict]:
-        return [_enrich_activity(a) for a in store.list_activities(user_id=current_user["id"])]
+        return [_serialize_activity(a, store) for a in store.list_activities(user_id=current_user["id"])]
 
     @r.get("/activities/{activity_id}")
     async def get_activity(activity_id: str, current_user: CurrentUser) -> dict:
@@ -91,7 +148,7 @@ def make_router(store: Store) -> APIRouter:
         repo = store.get_repo(activity["repo_id"])
         if repo is None or repo.get("user_id") != current_user["id"]:
             raise HTTPException(status_code=403, detail="Access denied")
-        return _enrich_activity(activity)
+        return _serialize_activity(activity, store, include_detail=True)
 
     @r.get("/activities/{activity_id}/logs")
     async def get_activity_logs(activity_id: str, current_user: CurrentUser) -> list[dict]:
