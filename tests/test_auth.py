@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import catocode.auth as auth_module
 import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from catocode.auth import get_github_app_auth
+from catocode.auth import get_auth, get_github_app_auth
 from catocode.auth.github_app import GitHubAppAuth
 from catocode.config import (
     get_github_app_client_id,
@@ -38,12 +39,28 @@ def test_get_github_app_auth_uses_global_app_credentials(monkeypatch):
     assert auth._installation_id is None
 
 
+def test_auth_module_no_longer_exports_token_auth():
+    assert "TokenAuth" not in auth_module.__all__
+    assert not hasattr(auth_module, "TokenAuth")
+
+
 def test_get_github_app_auth_ignores_github_token(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_abc")
     monkeypatch.setenv("GITHUB_APP_ID", "123456")
     monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----")
 
     auth = get_github_app_auth()
+    assert isinstance(auth, GitHubAppAuth)
+    assert auth._installation_id is None
+
+
+def test_get_auth_ignores_legacy_pat_and_default_installation(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_abc")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "789")
+    monkeypatch.setenv("GITHUB_APP_ID", "123456")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----")
+
+    auth = get_auth()
     assert isinstance(auth, GitHubAppAuth)
     assert auth._installation_id is None
 

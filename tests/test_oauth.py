@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 
 from catocode.api.app import create_app
 from catocode.api.crypto import encrypt_token
-from catocode.auth.token import TokenAuth
 from catocode.store import Store
+from tests.fakes import StaticAuth
 
 
 def _make_store(tmp_path: Path) -> Store:
@@ -17,7 +17,7 @@ def _make_store(tmp_path: Path) -> Store:
 
 def _make_client(tmp_path: Path) -> tuple[TestClient, Store]:
     store = _make_store(tmp_path)
-    app = create_app(store=store, auth=TokenAuth("ghp_test"))
+    app = create_app(store=store, auth=StaticAuth())
     return TestClient(app), store
 
 

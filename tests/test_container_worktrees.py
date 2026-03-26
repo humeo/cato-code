@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from catocode.container.manager import ContainerManager, ExecResult
+from catocode.container.manager import ContainerManager, ExecResult, _container_env
 from catocode.session_runtime import session_branch_name, session_worktree_path
 
 
@@ -10,6 +10,24 @@ def test_session_worktree_path_uses_repo_scoped_root():
 
 def test_session_branch_name_uses_catocode_namespace():
     assert session_branch_name("session-123") == "catocode/session/session-123"
+
+
+def test_container_env_uses_installation_token_names():
+    env = _container_env("sk-test", "ghs_installation", "https://anthropic.example")
+
+    assert env["ANTHROPIC_API_KEY"] == "sk-test"
+    assert env["CATOCODE_GITHUB_INSTALLATION_TOKEN"] == "ghs_installation"
+    assert env["GH_TOKEN"] == "ghs_installation"
+    assert env["ANTHROPIC_BASE_URL"] == "https://anthropic.example"
+    assert "GITHUB_TOKEN" not in env
+
+
+def test_with_installation_token_exports_runtime_auth():
+    command = ContainerManager._with_installation_token("gh auth status", "ghs_installation")
+
+    assert "CATOCODE_GITHUB_INSTALLATION_TOKEN=ghs_installation" in command
+    assert "GH_TOKEN=ghs_installation" in command
+    assert "GITHUB_TOKEN" not in command
 
 
 def test_ensure_session_worktree_creates_branch_and_worktree(monkeypatch):

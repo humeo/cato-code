@@ -4,6 +4,7 @@ import asyncio
 import io
 import logging
 import os
+import shlex
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,12 +25,15 @@ CONTAINER_NAME = "catocode-worker"
 IMAGE_NAME = "catocode-worker:v1"
 MEMORY_LIMIT = os.environ.get("CATOCODE_MEM", "8g")
 CPU_QUOTA = int(os.environ.get("CATOCODE_CPUS", "4")) * 100_000
+INSTALLATION_TOKEN_ENV = "CATOCODE_GITHUB_INSTALLATION_TOKEN"
+GH_TOKEN_ENV = "GH_TOKEN"
 
 
 def _container_env(anthropic_api_key: str, github_token: str, anthropic_base_url: str | None = None) -> dict[str, str]:
     env: dict[str, str] = {
         "ANTHROPIC_API_KEY": anthropic_api_key,
-        "GITHUB_TOKEN": github_token,
+        INSTALLATION_TOKEN_ENV: github_token,
+        GH_TOKEN_ENV: github_token,
     }
     # Support custom Anthropic API endpoint
     if anthropic_base_url:
@@ -89,16 +93,12 @@ class ContainerManager:
         if container is None:
             self._build_image_if_needed()
             self._create_and_start(anthropic_api_key, github_token, anthropic_base_url)
-            new_container = self._get_container()
-            if new_container:
-                self._update_token(new_container, github_token)
             self._write_user_claude_md()
             self._configure_git_identity()
             return
 
         status = container.status
         if status == "running":
-            self._update_token(container, github_token)
             self._write_user_claude_md()
             self._configure_git_identity()
             return
@@ -111,13 +111,12 @@ class ContainerManager:
         else:
             raise RuntimeError(f"Container in unexpected state: {status}")
 
-    def _update_token(self, container: docker.models.containers.Container, github_token: str) -> None:
-        """Update GITHUB_TOKEN for all future bash -l sessions inside the container."""
-        container.exec_run(
-            ["sh", "-c", f"echo 'export GITHUB_TOKEN={github_token}' > /etc/profile.d/catocode-token.sh"],
-            user="root",
-        )
-        logger.debug("Updated GITHUB_TOKEN in container")
+    @staticmethod
+    def _with_installation_token(command: str, github_token: str | None) -> str:
+        if not github_token:
+            return command
+        quoted = shlex.quote(github_token)
+        return f"export {INSTALLATION_TOKEN_ENV}={quoted} {GH_TOKEN_ENV}={quoted} && {command}"
 
     def _build_image_if_needed(self) -> None:
         try:
@@ -218,12 +217,12 @@ class ContainerManager:
         buf.seek(0)
         container.put_archive(directory, buf)
 
-    def exec(self, command: str, workdir: str = "/repos") -> ExecResult:
+    def exec(self, command: str, workdir: str = "/repos", github_token: str | None = None) -> ExecResult:
         container = self._get_container()
         if container is None or container.status != "running":
             raise RuntimeError("Container not running")
         exit_code, output = container.exec_run(
-            cmd=["bash", "-lc", command],
+            cmd=["bash", "-lc", self._with_installation_token(command, github_token)],
             workdir=workdir,
             demux=True,
         )
@@ -233,7 +232,12 @@ class ContainerManager:
         logger.debug("exec [%d]: %s", exit_code, command[:80])
         return ExecResult(exit_code=exit_code, stdout=stdout, stderr=stderr)
 
-    async def exec_stream(self, command: str, workdir: str = "/repos") -> AsyncIterator[tuple[str | None, int | None]]:
+    async def exec_stream(
+        self,
+        command: str,
+        workdir: str = "/repos",
+        github_token: str | None = None,
+    ) -> AsyncIterator[tuple[str | None, int | None]]:
         """Yield (line, None) tuples, then final (None, exit_code) tuple."""
         container = self._get_container()
         if container is None or container.status != "running":
@@ -245,7 +249,7 @@ class ContainerManager:
         def _stream_thread() -> None:
             exec_id = container.client.api.exec_create(
                 container.id,
-                cmd=["bash", "-lc", command],
+                cmd=["bash", "-lc", self._with_installation_token(command, github_token)],
                 workdir=workdir,
                 user="catocode",
             )
@@ -266,19 +270,25 @@ class ContainerManager:
             if item[0] is None:  # Exit code sentinel
                 break
 
-    def ensure_repo(self, repo_id: str, repo_url: str) -> None:
+    def ensure_repo(self, repo_id: str, repo_url: str, github_token: str | None = None) -> None:
         """Clone repo if not present. repo_id = 'owner-repo' slug."""
         result = self.exec(f"test -d /repos/{repo_id}/.git")
         if result.exit_code != 0:
-            result = self.exec(f"git clone --depth=50 {repo_url} /repos/{repo_id}")
+            if github_token:
+                result = self.exec(f"git clone --depth=50 {repo_url} /repos/{repo_id}", github_token=github_token)
+            else:
+                result = self.exec(f"git clone --depth=50 {repo_url} /repos/{repo_id}")
             if result.exit_code != 0:
                 raise RuntimeError(f"git clone failed:\n{result.combined}")
             logger.info("Cloned %s -> /repos/%s", repo_url, repo_id)
 
-    def reset_repo(self, repo_id: str) -> None:
+    def reset_repo(self, repo_id: str, github_token: str | None = None) -> None:
         """Hard reset to origin default branch."""
         workdir = f"/repos/{repo_id}"
-        self.exec("git fetch origin", workdir=workdir)
+        if github_token:
+            self.exec("git fetch origin", workdir=workdir, github_token=github_token)
+        else:
+            self.exec("git fetch origin", workdir=workdir)
         result = self.exec(
             "git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'",
             workdir=workdir,
@@ -320,9 +330,18 @@ class ContainerManager:
             "fi".format(repo_root=repo_root, worktree_path=worktree_path)
         )
 
-    def ensure_session_worktree(self, repo_id: str, repo_url: str, session_id: str) -> str:
+    def ensure_session_worktree(
+        self,
+        repo_id: str,
+        repo_url: str,
+        session_id: str,
+        github_token: str | None = None,
+    ) -> str:
         """Ensure a dedicated git worktree exists for the runtime session."""
-        self.ensure_repo(repo_id, repo_url)
+        if github_token:
+            self.ensure_repo(repo_id, repo_url, github_token=github_token)
+        else:
+            self.ensure_repo(repo_id, repo_url)
         worktree_path = session_worktree_path(repo_id, session_id)
         branch_name = session_branch_name(session_id)
         exists = self.exec(f"test -d {worktree_path}/.git")
@@ -331,7 +350,10 @@ class ContainerManager:
             return worktree_path
 
         self.exec(f"mkdir -p /repos/.worktrees/{repo_id}")
-        self.exec("git fetch origin", workdir=f"/repos/{repo_id}")
+        if github_token:
+            self.exec("git fetch origin", workdir=f"/repos/{repo_id}", github_token=github_token)
+        else:
+            self.exec("git fetch origin", workdir=f"/repos/{repo_id}")
         result = self.exec(
             f"git worktree add {worktree_path} -b {branch_name}",
             workdir=f"/repos/{repo_id}",
@@ -365,6 +387,7 @@ class ContainerManager:
         cwd: str,
         max_turns: int = 200,
         session_id: str | None = None,
+        github_token: str | None = None,
     ) -> AsyncIterator[tuple[str | None, int | None]]:
         """Run SDK runner script inside container, streaming JSONL output.
 
@@ -380,6 +403,11 @@ class ContainerManager:
 
         session_arg = session_id if session_id else "-"
         cmd = f"python3 /app/run_activity.py {max_turns} {cwd} {session_arg} {prompt_path}"
+
+        if github_token:
+            async for item in self.exec_stream(cmd, workdir=cwd, github_token=github_token):
+                yield item
+            return
 
         async for item in self.exec_stream(cmd, workdir=cwd):
             yield item

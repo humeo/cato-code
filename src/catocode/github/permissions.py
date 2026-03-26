@@ -76,7 +76,7 @@ async def check_repo_write_access(
     Supports both PAT/OAuth tokens and GitHub App installation tokens (ghs_).
     """
     if not github_token:
-        return False, "GITHUB_TOKEN is not set"
+        return False, "GitHub token is not set"
 
     # GitHub App installation tokens (ghs_) don't support /user endpoint.
     # Verify by checking if the repo is accessible via the installation.

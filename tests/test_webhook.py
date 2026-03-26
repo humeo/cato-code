@@ -173,3 +173,27 @@ def test_parse_webhook_ignored_event():
     )
 
     assert event is None
+
+
+def test_legacy_repo_scoped_webhook_endpoint_removed(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from catocode.store import Store
+    from catocode.webhook.server import WebhookServer
+    from tests.fakes import StaticAuth
+
+    store = Store(db_path=tmp_path / "test.db")
+    server = WebhookServer(store, auth=StaticAuth())
+    client = TestClient(server.app)
+
+    response = client.post(
+        "/webhook/github/owner-repo",
+        content=b"{}",
+        headers={
+            "X-GitHub-Event": "issues",
+            "X-GitHub-Delivery": "legacy-endpoint",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert response.status_code == 404

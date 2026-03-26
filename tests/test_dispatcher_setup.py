@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import argparse
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
-
 import pytest
 
 from catocode.store import Store
@@ -168,102 +164,6 @@ class RetryClearsStaleStepsContainerManager:
 @pytest.fixture
 def store(tmp_path):
     return Store(db_path=tmp_path / "test.db")
-
-
-@pytest.mark.asyncio
-async def test_watch_queues_setup_not_init(store, monkeypatch):
-    from catocode import cli
-
-    monkeypatch.setattr(cli, "Store", lambda: store)
-
-    def fail_if_container_manager_used():
-        raise AssertionError("watch should not instantiate ContainerManager")
-
-    monkeypatch.setattr(cli, "ContainerManager", fail_if_container_manager_used)
-    monkeypatch.setattr(cli, "get_auth", lambda: SimpleNamespace(get_token=AsyncMock(return_value="token")))
-    monkeypatch.setattr(cli, "get_patrol_config", lambda: SimpleNamespace(max_issues=5, window_hours=24))
-    monkeypatch.setattr(
-        "catocode.github.permissions.check_repo_write_access",
-        AsyncMock(return_value=(True, "write access confirmed")),
-    )
-
-    exit_code = await cli.cmd_watch(
-        argparse.Namespace(repo_url="https://github.com/owner/repo")
-    )
-
-    assert exit_code == 0
-    activities = store.list_activities(repo_id="owner-repo")
-    assert len(activities) == 1
-    assert activities[0]["kind"] == "setup"
-    assert activities[0]["trigger"] == "watch"
-
-    repo = store.get_repo("owner-repo")
-    assert repo is not None
-    assert repo["watch"] == 1
-    assert repo["lifecycle_status"] == "setting_up"
-
-
-@pytest.mark.asyncio
-async def test_watch_ready_repo_is_idempotent(store, monkeypatch):
-    from catocode import cli
-
-    store.add_repo("owner-repo", "https://github.com/owner/repo")
-    store.update_repo("owner-repo", watch=1)
-    store.update_repo_lifecycle(
-        "owner-repo",
-        lifecycle_status="ready",
-        last_ready_at="2026-03-24T12:00:00+00:00",
-    )
-
-    monkeypatch.setattr(cli, "Store", lambda: store)
-    monkeypatch.setattr(cli, "get_auth", lambda: SimpleNamespace(get_token=AsyncMock(return_value="token")))
-    monkeypatch.setattr(cli, "get_patrol_config", lambda: SimpleNamespace(max_issues=5, window_hours=24))
-    monkeypatch.setattr(
-        "catocode.github.permissions.check_repo_write_access",
-        AsyncMock(return_value=(True, "write access confirmed")),
-    )
-
-    exit_code = await cli.cmd_watch(
-        argparse.Namespace(repo_url="https://github.com/owner/repo")
-    )
-
-    assert exit_code == 0
-    assert store.list_activities(repo_id="owner-repo") == []
-    repo = store.get_repo("owner-repo")
-    assert repo is not None
-    assert repo["lifecycle_status"] == "ready"
-    assert repo["watch"] == 1
-
-
-@pytest.mark.asyncio
-async def test_watch_requeues_stale_setting_up_repo(store, monkeypatch):
-    from catocode import cli
-
-    store.add_repo("owner-repo", "https://github.com/owner/repo")
-    store.update_repo("owner-repo", watch=1)
-    store.update_repo_lifecycle("owner-repo", lifecycle_status="setting_up")
-
-    monkeypatch.setattr(cli, "Store", lambda: store)
-    monkeypatch.setattr(cli, "get_auth", lambda: SimpleNamespace(get_token=AsyncMock(return_value="token")))
-    monkeypatch.setattr(cli, "get_patrol_config", lambda: SimpleNamespace(max_issues=5, window_hours=24))
-    monkeypatch.setattr(
-        "catocode.github.permissions.check_repo_write_access",
-        AsyncMock(return_value=(True, "write access confirmed")),
-    )
-
-    exit_code = await cli.cmd_watch(
-        argparse.Namespace(repo_url="https://github.com/owner/repo")
-    )
-
-    assert exit_code == 0
-    activities = store.list_activities(repo_id="owner-repo")
-    assert len(activities) == 1
-    assert activities[0]["kind"] == "setup"
-
-    repo = store.get_repo("owner-repo")
-    assert repo is not None
-    assert repo["lifecycle_status"] == "setting_up"
-    assert repo["last_setup_activity_id"] == activities[0]["id"]
 
 
 @pytest.mark.asyncio

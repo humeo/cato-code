@@ -7,13 +7,13 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from catocode.auth.token import TokenAuth
 from catocode.store import Store
 from catocode.webhook.server import WebhookServer
+from tests.fakes import StaticAuth
 
 
 def _make_client(store: Store) -> TestClient:
-    auth = TokenAuth("ghp_test")
+    auth = StaticAuth()
     server = WebhookServer(store, auth=auth)
     return TestClient(server.app)
 
@@ -41,7 +41,7 @@ def test_merged_pr_webhook_queues_repo_memory_refresh(tmp_path: Path):
     payload = _merged_pr_payload()
 
     resp = client.post(
-        "/webhook/github/owner-repo",
+        "/webhook/app",
         content=json.dumps(payload).encode(),
         headers={
             "X-GitHub-Event": "pull_request",
@@ -98,7 +98,7 @@ def test_bot_merged_pr_webhook_queues_repo_memory_refresh(tmp_path: Path):
     payload["sender"] = {"login": "merge-bot[bot]", "type": "Bot"}
 
     resp = client.post(
-        "/webhook/github/owner-repo",
+        "/webhook/app",
         content=json.dumps(payload).encode(),
         headers={
             "X-GitHub-Event": "pull_request",
@@ -125,16 +125,16 @@ def test_same_merged_pr_across_both_webhook_entrypoints_queues_one_refresh_activ
 
     payload = _merged_pr_payload()
 
-    github_resp = client.post(
-        "/webhook/github/owner-repo",
+    first_resp = client.post(
+        "/webhook/app",
         content=json.dumps(payload).encode(),
         headers={
             "X-GitHub-Event": "pull_request",
-            "X-GitHub-Delivery": "delivery-merged-github-1",
+            "X-GitHub-Delivery": "delivery-merged-app-1",
             "Content-Type": "application/json",
         },
     )
-    app_resp = client.post(
+    second_resp = client.post(
         "/webhook/app",
         content=json.dumps(payload).encode(),
         headers={
@@ -144,10 +144,10 @@ def test_same_merged_pr_across_both_webhook_entrypoints_queues_one_refresh_activ
         },
     )
 
-    assert github_resp.status_code == 200
-    assert app_resp.status_code == 200
-    assert github_resp.json()["status"] == "queued_repo_memory_refresh"
-    assert app_resp.json()["status"] == "duplicate_inflight"
+    assert first_resp.status_code == 200
+    assert second_resp.status_code == 200
+    assert first_resp.json()["status"] == "queued_repo_memory_refresh"
+    assert second_resp.json()["status"] == "duplicate_inflight"
 
     activities = store.list_activities("owner-repo")
     assert [a["kind"] for a in activities] == ["refresh_repo_memory_review"]
@@ -165,7 +165,7 @@ def test_non_pull_request_event_with_pr_payload_does_not_queue_repo_memory_refre
     payload = _merged_pr_payload()
 
     resp = client.post(
-        "/webhook/github/owner-repo",
+        "/webhook/app",
         content=json.dumps(payload).encode(),
         headers={
             "X-GitHub-Event": "issues",
@@ -192,7 +192,7 @@ def test_null_pull_request_payload_is_ignored_without_500(tmp_path: Path):
     }
 
     resp = client.post(
-        "/webhook/github/owner-repo",
+        "/webhook/app",
         content=json.dumps(payload).encode(),
         headers={
             "X-GitHub-Event": "pull_request",

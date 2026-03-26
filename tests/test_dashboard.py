@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 
 from catocode.api.app import create_app
 from catocode.api.crypto import encrypt_token
-from catocode.auth.token import TokenAuth
 from catocode.store import Store
+from tests.fakes import StaticAuth
 
 
 def _make_client(tmp_path: Path) -> tuple[TestClient, Store]:
@@ -21,7 +21,7 @@ def _make_client(tmp_path: Path) -> tuple[TestClient, Store]:
 
     os.environ.setdefault("SESSION_SECRET_KEY", "0" * 64)
     store = Store(db_path=tmp_path / "test.db")
-    auth = TokenAuth("ghp_test")
+    auth = StaticAuth()
     app = create_app(store=store, auth=auth)
     store.create_user(
         user_id="user-1",
@@ -46,7 +46,7 @@ def test_root_path_not_exposed(tmp_path):
 
 def test_api_requires_authentication(tmp_path):
     store = Store(db_path=tmp_path / "test.db")
-    app = create_app(store=store, auth=TokenAuth("ghp_test"))
+    app = create_app(store=store, auth=StaticAuth())
     client = TestClient(app)
 
     resp = client.get("/api/stats")
@@ -262,6 +262,67 @@ def test_api_retry_setup_requeues_repo_and_clears_error(tmp_path):
     assert repo["lifecycle_status"] == "setting_up"
     assert repo["last_error"] is None
     assert repo["last_setup_activity_id"] == payload["activity_id"]
+
+
+def test_api_watch_repo_marks_repo_watched_and_queues_setup(tmp_path):
+    client, store = _make_client(tmp_path)
+    store.add_repo("owner-repo", "https://github.com/owner/repo")
+    store.update_repo("owner-repo", installation_id="111")
+
+    with patch("catocode.api.routes.check_repo_write_access", return_value=(True, "write")):
+        resp = client.post("/api/repos/owner-repo/watch")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    activity = store.get_activity(payload["activity_id"])
+    repo = store.get_repo("owner-repo")
+
+    assert payload["status"] == "queued"
+    assert activity is not None
+    assert activity["kind"] == "setup"
+    assert activity["trigger"] == "watch"
+    assert repo is not None
+    assert repo["watch"] == 1
+    assert repo["lifecycle_status"] == "setting_up"
+    assert repo["last_setup_activity_id"] == activity["id"]
+
+
+def test_api_watch_ready_repo_is_idempotent(tmp_path):
+    client, store = _make_client(tmp_path)
+    store.add_repo("owner-repo", "https://github.com/owner/repo")
+    store.update_repo("owner-repo", watch=1, installation_id="111")
+    store.update_repo_lifecycle(
+        "owner-repo",
+        lifecycle_status="ready",
+        last_ready_at="2026-03-24T12:00:00+00:00",
+    )
+
+    with patch("catocode.api.routes.check_repo_write_access", return_value=(True, "write")):
+        resp = client.post("/api/repos/owner-repo/watch")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["status"] == "ready"
+    assert payload["activity_id"] is None
+    assert store.list_activities(repo_id="owner-repo") == []
+
+
+def test_api_unwatch_repo_keeps_repo_visible_but_stops_watch(tmp_path):
+    client, store = _make_client(tmp_path)
+    store.add_repo("owner-repo", "https://github.com/owner/repo")
+    store.update_repo("owner-repo", watch=1, installation_id="111")
+    store.update_repo_lifecycle("owner-repo", lifecycle_status="ready")
+
+    with patch("catocode.api.routes.check_repo_write_access", return_value=(True, "write")):
+        resp = client.delete("/api/repos/owner-repo/watch")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    repo = store.get_repo("owner-repo")
+    assert payload == {"status": "unwatched"}
+    assert repo is not None
+    assert repo["watch"] == 0
+    assert repo["lifecycle_status"] == "watched"
 
 
 def test_webhook_health(tmp_path):

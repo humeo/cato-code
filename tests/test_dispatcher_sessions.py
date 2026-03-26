@@ -60,6 +60,76 @@ class SessionAwareContainerManager:
         raise AssertionError(f"Unexpected command: {command} @ {workdir}")
 
 
+class InstallationTokenContainerManager:
+    def __init__(self, worktree_path: str) -> None:
+        self.worktree_path = worktree_path
+        self.ensure_running_tokens: list[str] = []
+        self.ensure_repo_tokens: list[str | None] = []
+        self.ensure_session_worktree_tokens: list[str | None] = []
+        self.exec_sdk_runner_tokens: list[str | None] = []
+
+    def ensure_running(
+        self,
+        anthropic_api_key: str,
+        github_token: str,
+        anthropic_base_url: str | None = None,
+    ) -> None:
+        self.ensure_running_tokens.append(github_token)
+
+    def ensure_repo(self, repo_id: str, repo_url: str, github_token: str | None = None) -> None:
+        self.ensure_repo_tokens.append(github_token)
+
+    def ensure_session_worktree(
+        self,
+        repo_id: str,
+        repo_url: str,
+        session_id: str,
+        github_token: str | None = None,
+    ) -> str:
+        self.ensure_session_worktree_tokens.append(github_token)
+        return self.worktree_path
+
+    def reset_checkout(self, workdir: str, target_ref: str | None = None) -> None:
+        assert workdir == self.worktree_path
+
+    def exec(self, command: str, workdir: str = "/repos", github_token: str | None = None) -> FakeExecResult:
+        if command == "test -f CLAUDE.md" and workdir == "/repos/owner-repo":
+            return FakeExecResult(exit_code=0)
+        if command == "git rev-parse HEAD" and workdir == self.worktree_path:
+            return FakeExecResult(stdout="abc123\n")
+        raise AssertionError(f"Unexpected command: {command} @ {workdir}")
+
+    async def exec_sdk_runner(
+        self,
+        prompt: str,
+        cwd: str,
+        max_turns: int = 200,
+        session_id: str | None = None,
+        github_token: str | None = None,
+    ):
+        self.exec_sdk_runner_tokens.append(github_token)
+        result = ActivityResultEnvelope(
+            status="done",
+            summary="Executed with installation token.",
+            session={"sdk_session_id": "sdk-install", "continued": True},
+            writebacks=[],
+            artifacts={},
+            metrics={"cost_usd": 0.1},
+        )
+        yield (
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": json.dumps(result.to_dict()),
+                    "session_id": "sdk-install",
+                    "cost_usd": 0.1,
+                }
+            ),
+            None,
+        )
+        yield (None, 0)
+
+
 def _seed_ready_repo(store: Store) -> None:
     store.add_repo("owner-repo", "https://github.com/owner/repo")
     setup_id = store.add_activity("owner-repo", "setup", "watch")
@@ -331,3 +401,41 @@ async def test_dispatch_fix_issue_restores_latest_checkpoint_before_recovery_run
     assert container_mgr.reset_checkout_calls == [
         ("/repos/.worktrees/owner-repo/runtime-session-recover", "abc123")
     ]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_fix_issue_threads_installation_token_to_container_runtime(monkeypatch, tmp_path):
+    from catocode.dispatcher import dispatch
+
+    store = Store(db_path=tmp_path / "test.db")
+    _seed_ready_repo(store)
+    store.update_repo("owner-repo", installation_id="inst-123")
+    runtime_session_id = store.create_runtime_session(
+        repo_id="owner-repo",
+        entry_kind="fix_issue",
+        status="active",
+        worktree_path="/repos/.worktrees/owner-repo/runtime-install-token",
+        branch_name="catocode/session/runtime-install-token",
+        issue_number=42,
+    )
+    activity_id = store.add_activity("owner-repo", "fix_issue", "issue:42")
+    store.update_activity(activity_id, session_id=runtime_session_id)
+    container_mgr = InstallationTokenContainerManager("/repos/.worktrees/owner-repo/runtime-install-token")
+
+    monkeypatch.setattr("catocode.dispatcher._build_prompt", AsyncMock(return_value="fix prompt"))
+    monkeypatch.setattr("catocode.dispatcher._index_repo_from_container", lambda *args, **kwargs: None)
+    monkeypatch.setattr("catocode.dispatcher.prepare_codebase_graph_runtime", lambda *args, **kwargs: None)
+
+    await dispatch(
+        activity_id=activity_id,
+        store=store,
+        container_mgr=container_mgr,
+        anthropic_api_key="sk-ant",
+        github_token="ghs_installation_token",
+        verbose=False,
+    )
+
+    assert container_mgr.ensure_running_tokens == ["ghs_installation_token"]
+    assert container_mgr.ensure_repo_tokens == ["ghs_installation_token"]
+    assert container_mgr.ensure_session_worktree_tokens == ["ghs_installation_token"]
+    assert container_mgr.exec_sdk_runner_tokens == ["ghs_installation_token"]

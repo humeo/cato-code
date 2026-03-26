@@ -41,9 +41,28 @@ export async function getActivities(): Promise<Activity[] | null> {
   return apiFetch<Activity[]>("/api/activities");
 }
 
-export async function deleteRepo(repoId: string): Promise<boolean> {
+export async function watchRepo(
+  repoId: string
+): Promise<{ status: string; activity_id: string | null } | { error: string } | null> {
   try {
-    const res = await fetch(`${API_URL}/api/repos/${repoId}`, { method: "DELETE", credentials: "include" });
+    const res = await fetch(`${API_URL}/api/repos/${repoId}/watch`, { method: "POST", credentials: "include" });
+    if (!res.ok) {
+      try {
+        const body = await res.json();
+        return { error: body.detail ?? `HTTP ${res.status}` };
+      } catch {
+        return { error: `HTTP ${res.status}` };
+      }
+    }
+    return res.json();
+  } catch {
+    return { error: "Network error" };
+  }
+}
+
+export async function unwatchRepo(repoId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_URL}/api/repos/${repoId}/watch`, { method: "DELETE", credentials: "include" });
     return res.ok;
   } catch {
     return false;

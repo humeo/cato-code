@@ -2,10 +2,11 @@
 
 Run with:
     uv run pytest -m integration
-    uv run pytest -m e2e  (also needs GITHUB_TOKEN)
+    uv run pytest -m e2e  (also needs GitHub App test credentials)
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -13,14 +14,26 @@ from pathlib import Path
 import pytest
 
 
+def _get_test_installation_token() -> str:
+    installation_id = os.environ.get("CATOCODE_TEST_INSTALLATION_ID")
+    if not installation_id:
+        return ""
+    if not os.environ.get("GITHUB_APP_ID") or not os.environ.get("GITHUB_APP_PRIVATE_KEY"):
+        return ""
+
+    from catocode.auth import get_github_app_auth
+
+    return asyncio.run(get_github_app_auth().get_installation_token(installation_id))
+
+
 @pytest.fixture(scope="session")
 def container_mgr():
     """Start catocode-worker container, stop after test session."""
     from catocode.container.manager import ContainerManager
-    from catocode.config import get_anthropic_api_key, get_anthropic_base_url, get_github_token
+    from catocode.config import get_anthropic_base_url
 
     api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
-    github_token = get_github_token() or ""
+    github_token = _get_test_installation_token()
     base_url = get_anthropic_base_url()
 
     mgr = ContainerManager()
@@ -139,7 +152,7 @@ def test_sdk_runner_disallowed_tools(container_mgr):
     assert "AskUserQuestion" in result.stdout
 
 
-# --- End-to-End (needs GITHUB_TOKEN) ---
+# --- End-to-End (needs GitHub App test credentials) ---
 
 @pytest.mark.integration
 @pytest.mark.e2e
@@ -147,18 +160,20 @@ def test_fix_issue_end_to_end(container_mgr, store):
     """Full fix flow: clone → init → fix → PR with evidence.
 
     Requires a test repo with a known fixable bug.
-    Set CATOCODE_TEST_ISSUE_URL in env to specify the issue.
+    Set CATOCODE_TEST_ISSUE_URL and CATOCODE_TEST_INSTALLATION_ID in env to run.
     """
-    import asyncio
     from catocode.config import (
         get_anthropic_api_key, get_anthropic_base_url,
-        get_github_token, parse_issue_url, repo_id_from_url,
+        parse_issue_url, repo_id_from_url,
     )
     from catocode.dispatcher import dispatch
 
     issue_url = os.environ.get("CATOCODE_TEST_ISSUE_URL")
     if not issue_url:
         pytest.skip("Set CATOCODE_TEST_ISSUE_URL to run end-to-end test")
+    github_token = _get_test_installation_token()
+    if not github_token:
+        pytest.skip("Set CATOCODE_TEST_INSTALLATION_ID plus GitHub App credentials to run end-to-end test")
 
     owner, repo, issue_num = parse_issue_url(issue_url)
     repo_url = f"https://github.com/{owner}/{repo}"
@@ -172,7 +187,7 @@ def test_fix_issue_end_to_end(container_mgr, store):
         store=store,
         container_mgr=container_mgr,
         anthropic_api_key=get_anthropic_api_key(),
-        github_token=get_github_token() or "",
+        github_token=github_token,
         anthropic_base_url=get_anthropic_base_url(),
     ))
 

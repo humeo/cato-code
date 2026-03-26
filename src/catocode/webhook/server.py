@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from ..auth import Auth, get_auth
+from ..auth.base import GitHubAppTokenProvider
 from ..config import get_github_app_webhook_secret, parse_repo_url, repo_id_from_url
 from ..decision import decide_engagement
 from ..github.commenter import post_issue_comment
@@ -54,8 +55,6 @@ class WebhookServer:
                 "Set this variable in production to prevent spoofed webhook events."
             )
 
-        # Per-repo webhook (personal token mode or manual setup)
-        self.app.post("/webhook/github/{repo_id}")(self._handle_webhook)
         # GitHub App-level webhook (all events from all installations)
         self.app.post("/webhook/app")(self._handle_app_webhook)
         self.app.get("/webhook/health")(self._health_check)
@@ -64,165 +63,11 @@ class WebhookServer:
         """Health check endpoint."""
         return {"status": "ok"}
 
-    async def _handle_webhook(
-        self,
-        repo_id: str,
-        request: Request,
-        x_github_event: str = Header(...),
-        x_github_delivery: str = Header(...),
-        x_hub_signature_256: str | None = Header(None),
-    ) -> Response:
-        """Handle incoming GitHub webhook.
-
-        Args:
-            repo_id: Repository ID (owner-repo format)
-            request: FastAPI request object
-            x_github_event: Event type (issues, pull_request, etc.)
-            x_github_delivery: Unique delivery ID
-            x_hub_signature_256: HMAC signature for verification
-
-        Returns:
-            JSON response with status
-        """
-        # Get repository configuration
-        repo = self._store.get_repo(repo_id)
-        if repo is None:
-            logger.warning("Webhook received for unknown repo: %s", repo_id)
-            raise HTTPException(status_code=404, detail="Repository not found")
-
-        # Get webhook secret (optional — if not configured, skip signature verification)
-        webhook_config = self._store.get_webhook_config(repo_id)
-
-        # Read raw body for signature verification
-        body = await request.body()
-
-        # Verify signature only if a secret is configured
-        if webhook_config and webhook_config.get("webhook_secret"):
-            secret = webhook_config["webhook_secret"]
-            if x_hub_signature_256:
-                if not verify_signature(body, x_hub_signature_256, secret):
-                    logger.warning("Invalid webhook signature for repo: %s", repo_id)
-                    raise HTTPException(status_code=401, detail="Invalid signature")
-            else:
-                logger.warning("Missing webhook signature for repo: %s", repo_id)
-                raise HTTPException(status_code=401, detail="Missing signature")
-        else:
-            logger.debug("No webhook secret configured for %s, skipping signature check", repo_id)
-
-        # Parse JSON payload
-        try:
-            payload = json.loads(body)
-        except json.JSONDecodeError:
-            logger.error("Invalid JSON payload for repo: %s", repo_id)
-            raise HTTPException(status_code=400, detail="Invalid JSON")
-
-        # Check for duplicate delivery
-        if self._store.is_webhook_event_processed(x_github_delivery):
-            logger.info("Duplicate webhook delivery: %s", x_github_delivery)
-            return JSONResponse({"status": "duplicate", "event_id": x_github_delivery})
-
-        # Store raw webhook event
-        self._store.add_webhook_event(
-            event_id=x_github_delivery,
-            repo_id=repo_id,
-            event_type=x_github_event,
-            payload=json.dumps(payload),
-        )
-
-        # Parse webhook into normalized event
-        if x_github_event == "pull_request" and not isinstance(payload.get("pull_request"), dict):
-            logger.debug("Malformed pull_request payload ignored for repo %s", repo_id)
-            self._store.mark_webhook_event_processed(x_github_delivery)
-            return JSONResponse({"status": "ignored", "event_type": x_github_event})
-
-        event = parse_webhook(
-            event_name=x_github_event,
-            payload=payload,
-            delivery_id=x_github_delivery,
-            repo_id=repo_id,
-        )
-        self._mark_closed_pr_runtime_sessions(x_github_event, repo_id, payload)
-        repo_memory_refresh_status = self._queue_merged_pr_repo_memory_refresh(
-            x_github_event, repo_id, payload
-        )
-
-        if event is None:
-            logger.debug("Webhook event ignored: %s for repo %s", x_github_event, repo_id)
-            self._store.mark_webhook_event_processed(x_github_delivery)
-            if repo_memory_refresh_status is not None:
-                return JSONResponse({
-                    "status": repo_memory_refresh_status,
-                    "event_type": x_github_event,
-                })
-            return JSONResponse({"status": "ignored", "event_type": x_github_event})
-
-        # Make engagement decision
-        decision = await decide_engagement(event, repo, self._store)
-
-        logger.info(
-            "Webhook decision for %s: engage=%s, kind=%s, reason=%s",
-            event.event_type,
-            decision.should_engage,
-            decision.activity_kind,
-            decision.reason,
-        )
-
-        if not decision.should_engage:
-            self._store.mark_webhook_event_processed(x_github_delivery)
-            return JSONResponse({
-                "status": "no_action",
-                "reason": decision.reason,
-            })
-
-        # Handle approval workflow
-        if decision.activity_kind == "approve_activity":
-            await self._handle_approval(event, payload)
-            self._store.mark_webhook_event_processed(x_github_delivery)
-            return JSONResponse({
-                "status": "approved",
-                "event_id": x_github_delivery,
-            })
-
-        # Create activity
-        activity_id = self._store.add_activity(
-            repo_id=repo_id,
-            kind=decision.activity_kind or "",
-            trigger=event.trigger,
-        )
-        self._attach_runtime_session(activity_id)
-
-        # Set approval requirement if needed
-        if decision.requires_approval:
-            self._store.update_activity(
-                activity_id,
-                requires_approval=1,
-            )
-            # For task activities, immediately post a comment so the user knows approval is needed
-            if decision.activity_kind == "task":
-                asyncio.ensure_future(
-                    self._post_pending_approval_comment(event, repo)
-                )
-
-        # Auto-index issues and record PR reviews for patrol dedup
-        asyncio.ensure_future(
-            self._handle_patrol_side_effects(x_github_event, payload, repo_id)
-        )
-
-        self._store.mark_webhook_event_processed(x_github_delivery)
-
-        logger.info(
-            "Created %s activity %s from webhook %s",
-            decision.activity_kind,
-            activity_id[:8],
-            x_github_delivery,
-        )
-
-        return JSONResponse({
-            "status": "created",
-            "activity_id": activity_id,
-            "activity_kind": decision.activity_kind,
-            "event_id": x_github_delivery,
-        })
+    async def _resolve_repo_github_token(self, repo: dict | None) -> str:
+        installation_id = repo.get("installation_id") if repo else None
+        if installation_id and isinstance(self._auth, GitHubAppTokenProvider):
+            return await self._auth.get_installation_token(installation_id)
+        return await self._auth.get_token()
 
     async def _handle_approval(self, event: Any, payload: dict[str, Any]) -> None:
         """Handle approval comment by transitioning pending_approval activity to pending."""
@@ -254,7 +99,7 @@ class WebhookServer:
             logger.error("Invalid repo URL: %s", repo["repo_url"])
             return
 
-        github_token = await self._auth.get_token()
+        github_token = await self._resolve_repo_github_token(repo)
         is_admin = await check_user_is_admin(comment_author, owner, repo_name, github_token)
 
         if not is_admin:
@@ -523,7 +368,7 @@ class WebhookServer:
             except ValueError:
                 return
 
-            github_token = await self._auth.get_token()
+            github_token = await self._resolve_repo_github_token(repo)
             if not github_token:
                 return
 
@@ -573,7 +418,7 @@ class WebhookServer:
             if len(trigger_parts) < 2:
                 return
             issue_num = int(trigger_parts[1])
-            github_token = await self._auth.get_token()
+            github_token = await self._resolve_repo_github_token(repo)
             body = (
                 "I've received your request and queued it for review.\n\n"
                 "A maintainer with write access needs to type `/approve` to proceed.\n\n"
@@ -611,7 +456,8 @@ class WebhookServer:
     async def _index_repo_issues_background(self, repo_id: str, owner: str, repo_name: str) -> None:
         """Background task: index all open issues for a newly-added repo."""
         try:
-            github_token = await self._auth.get_token()
+            repo = self._store.get_repo(repo_id)
+            github_token = await self._resolve_repo_github_token(repo)
             if not github_token:
                 return
             from ..issue_indexer import index_repo_issues
@@ -632,26 +478,20 @@ class WebhookServer:
 
         if action == "created":
             self._store.add_installation(installation_id, account_login, account_type)
-            watched = []
+            registered = []
             for repo_info in repos:
                 repo_url = f"https://github.com/{repo_info['full_name']}"
                 repo_id = repo_id_from_url(repo_url)
-                owner, repo_name = repo_info["full_name"].split("/", 1)
                 self._store.add_repo(repo_id, repo_url)
-                self._store.update_repo(repo_id, watch=1)
                 self._store.bind_repo_installation(repo_id, installation_id)
                 # Link repo to user if installation is associated with one
                 user_id = self._store.get_user_id_for_installation(installation_id)
                 if user_id:
                     self._store.update_repo(repo_id, user_id=user_id)
-                watched.append(repo_id)
-                logger.info("Auto-watched repo from App installation: %s", repo_id)
-                # Kick off background issue indexing for dedup
-                asyncio.ensure_future(
-                    self._index_repo_issues_background(repo_id, owner, repo_name)
-                )
+                registered.append(repo_id)
+                logger.info("Registered repo from App installation (awaiting watch): %s", repo_id)
             self._store.mark_webhook_event_processed(delivery_id)
-            return {"status": "installation_created", "watched_repos": watched}
+            return {"status": "installation_created", "registered_repos": registered}
 
         elif action == "deleted":
             watched_repos = [
@@ -688,31 +528,26 @@ class WebhookServer:
 
         user_id = self._store.get_user_id_for_installation(installation_id) if installation_id else None
 
-        watched, unwatched = [], []
+        added_repo_ids, removed_repo_ids = [], []
 
         for repo_info in added:
             repo_url = f"https://github.com/{repo_info['full_name']}"
             repo_id = repo_id_from_url(repo_url)
-            owner, repo_name = repo_info["full_name"].split("/", 1)
             self._store.add_repo(repo_id, repo_url)
-            self._store.update_repo(repo_id, watch=1)
             if installation_id:
                 self._store.bind_repo_installation(repo_id, installation_id)
             if user_id:
                 self._store.update_repo(repo_id, user_id=user_id)
-            watched.append(repo_id)
-            logger.info("Auto-watched repo added to installation: %s", repo_id)
-            asyncio.ensure_future(
-                self._index_repo_issues_background(repo_id, owner, repo_name)
-            )
+            added_repo_ids.append(repo_id)
+            logger.info("Registered repo added to installation (awaiting watch): %s", repo_id)
 
         for repo_info in removed:
             repo_url = f"https://github.com/{repo_info['full_name']}"
             repo_id = repo_id_from_url(repo_url)
             self._store.update_repo(repo_id, watch=0)
             self._store.clear_repo_installation(repo_id)
-            unwatched.append(repo_id)
+            removed_repo_ids.append(repo_id)
             logger.info("Auto-unwatched repo removed from installation: %s", repo_id)
 
         self._store.mark_webhook_event_processed(delivery_id)
-        return {"status": "repositories_updated", "watched": watched, "unwatched": unwatched}
+        return {"status": "repositories_updated", "added": added_repo_ids, "removed": removed_repo_ids}

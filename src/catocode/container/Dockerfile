@@ -38,7 +38,7 @@ RUN pip3 install --break-system-packages playwright
 
 # Layer 8: git credential helper + global git config
 # Note: user.name and user.email are set at runtime via _configure_git_identity()
-RUN printf '#!/bin/bash\necho "protocol=https"\necho "host=github.com"\necho "username=x-access-token"\necho "password=${GITHUB_TOKEN}"\n' \
+RUN printf '#!/bin/bash\necho "protocol=https"\necho "host=github.com"\necho "username=x-access-token"\necho "password=${CATOCODE_GITHUB_INSTALLATION_TOKEN}"\n' \
       > /usr/local/bin/git-credential-catocode \
     && chmod +x /usr/local/bin/git-credential-catocode \
     && git config --global credential.helper catocode \

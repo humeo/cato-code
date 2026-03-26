@@ -15,13 +15,11 @@ from rich.panel import Panel
 from .auth import get_auth
 from .config import (
     get_anthropic_api_key,
-    get_anthropic_base_url,
-    get_patrol_config,
-    parse_issue_url,
-    repo_id_from_url,
+    get_github_app_client_id,
+    get_github_app_client_secret,
+    get_session_secret_key,
 )
 from .container.manager import ContainerManager
-from .dispatcher import dispatch
 from .store import Store
 
 console = Console()
@@ -41,14 +39,6 @@ def build_parser() -> argparse.ArgumentParser:
     server_p.add_argument("--port", type=int, default=8000, help="Port to listen on (default: 8000)")
     server_p.add_argument("--max-concurrent", type=int, default=3)
 
-    # --- watch ---
-    watch_p = subparsers.add_parser("watch", help="Watch a repo (auto-triage issues, patrol)")
-    watch_p.add_argument("repo_url", help="GitHub repo URL")
-
-    # --- unwatch ---
-    unwatch_p = subparsers.add_parser("unwatch", help="Stop watching a repo")
-    unwatch_p.add_argument("repo_url", help="GitHub repo URL")
-
     # --- daemon ---
     daemon_p = subparsers.add_parser("daemon", help="Run background scheduler (blocking)")
     daemon_p.add_argument("--max-concurrent", type=int, default=3, help="Max concurrent activities")
@@ -59,11 +49,6 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PORT",
         help="Start webhook server on PORT (0 = disabled, default: 0)",
     )
-
-    # --- fix ---
-    fix_p = subparsers.add_parser("fix", help="Fix a GitHub issue (blocking)")
-    fix_p.add_argument("issue_url", help="GitHub issue URL")
-    fix_p.add_argument("--max-turns", type=int, default=200)
 
     # --- status ---
     status_p = subparsers.add_parser("status", help="Show repo or activity status")
@@ -76,93 +61,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     return parser
 
-
-# --- watch ---
-
-async def cmd_watch(args: argparse.Namespace) -> int:
-    repo_url = args.repo_url
-    try:
-        from .config import parse_repo_url
-        owner, repo_name = parse_repo_url(repo_url)
-    except ValueError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        return 1
-
-    repo_id = repo_id_from_url(repo_url)
-    store = Store()
-    existing_repo = store.get_repo(repo_id)
-
-    try:
-        auth = get_auth()
-        github_token = await auth.get_token()
-    except RuntimeError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        return 1
-
-    # Check write access before registering
-    from .github.permissions import check_repo_write_access
-    console.print(f"[dim]Checking permissions for {owner}/{repo_name}...[/dim]")
-    has_access, reason = await check_repo_write_access(owner, repo_name, github_token)
-    if not has_access:
-        console.print(f"[red]Permission denied:[/red] {reason}")
-        console.print(
-            "[dim]CatoCode needs write access to post comments and open PRs.[/dim]"
-        )
-        return 1
-    console.print(f"[dim]✓ {reason}[/dim]")
-
-    # Register and mark as watched
-    store.add_repo(repo_id, repo_url)
-    store.update_repo(repo_id, watch=1)
-
-    # Initialize patrol budget
-    patrol_cfg = get_patrol_config()
-    store.init_patrol_budget(repo_id, patrol_cfg.max_issues, patrol_cfg.window_hours)
-
-    console.print(f"[green]Watching[/green] {repo_url} (repo_id: {repo_id})")
-
-    if existing_repo is not None and existing_repo.get("lifecycle_status") == "ready":
-        console.print(f"[dim]{repo_id} is already ready. No new setup queued.[/dim]")
-        return 0
-
-    if existing_repo is not None and existing_repo.get("lifecycle_status") == "setting_up":
-        active_setup = next(
-            (
-                activity
-                for activity in reversed(store.list_activities(repo_id=repo_id))
-                if activity["kind"] == "setup" and activity["status"] in {"pending", "running"}
-            ),
-            None,
-        )
-        if active_setup is not None:
-            console.print(f"[dim]{repo_id} is already setting up. No duplicate setup queued.[/dim]")
-            return 0
-
-    activity_id = store.add_activity(repo_id, "setup", "watch")
-    store.update_repo_lifecycle(
-        repo_id,
-        lifecycle_status="setting_up",
-        last_error=None,
-        last_setup_activity_id=activity_id,
-    )
-    console.print(f"[dim]Queued setup activity {activity_id[:8]} for {repo_id}.[/dim]")
-    console.print("[dim]Start daemon to run setup and begin watching.[/dim]")
-
-    return 0
-
-
-async def cmd_unwatch(args: argparse.Namespace) -> int:
-    repo_id = repo_id_from_url(args.repo_url)
-    store = Store()
-    repo = store.get_repo(repo_id)
-    if repo is None:
-        console.print(f"[red]Repo not found:[/red] {repo_id}")
-        return 1
-    store.update_repo(repo_id, watch=0)
-    console.print(f"[yellow]Unwatched[/yellow] {repo_id}")
-    return 0
-
-
 # --- daemon ---
 
 async def cmd_server(args: argparse.Namespace) -> int:
@@ -174,11 +72,14 @@ async def cmd_server(args: argparse.Namespace) -> int:
 
 async def cmd_daemon(args: argparse.Namespace) -> int:
     from .scheduler import Scheduler
-    from .webhook.server import WebhookServer
 
     try:
         get_anthropic_api_key()
         auth = get_auth()
+        if args.webhook_port:
+            get_github_app_client_id()
+            get_github_app_client_secret()
+            get_session_secret_key()
     except RuntimeError as e:
         console.print(f"[red]Error:[/red] {e}")
         return 1
@@ -209,21 +110,12 @@ async def cmd_daemon(args: argparse.Namespace) -> int:
     tasks = [asyncio.create_task(scheduler.run())]
 
     if webhook_port:
-        import os
-
         import uvicorn
 
-        # Use unified SaaS app when OAuth credentials are configured
-        oauth_client_id = os.environ.get("GITHUB_OAUTH_CLIENT_ID")
-        session_key = os.environ.get("SESSION_SECRET_KEY")
-        if oauth_client_id and session_key:
-            from .api.app import create_app
-            app = create_app(store=store, auth=auth)
-            console.print("[dim]SaaS mode: OAuth + API + webhooks on same port[/dim]")
-        else:
-            webhook_server = WebhookServer(store, auth=auth)
-            app = webhook_server.app
-            console.print("[dim]Legacy mode: webhook server only (set GITHUB_OAUTH_CLIENT_ID + SESSION_SECRET_KEY for SaaS)[/dim]")
+        from .api.app import create_app
+
+        app = create_app(store=store, auth=auth)
+        console.print("[dim]GitHub App SaaS mode: login + API + webhooks on same port[/dim]")
 
         config = uvicorn.Config(
             app,
@@ -245,104 +137,6 @@ async def cmd_daemon(args: argparse.Namespace) -> int:
     return 0
 
 
-# --- fix ---
-
-async def cmd_fix(args: argparse.Namespace) -> int:
-    try:
-        owner, repo, issue_number = parse_issue_url(args.issue_url)
-    except ValueError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        return 1
-
-    repo_url = f"https://github.com/{owner}/{repo}"
-    repo_id = repo_id_from_url(repo_url)
-
-    console.print(
-        Panel(
-            f"[bold]CatoCode[/bold] — fix issue\n"
-            f"Repo: [cyan]{owner}/{repo}[/cyan]\n"
-            f"Issue: [yellow]#{issue_number}[/yellow]\n"
-            f"Max turns: [magenta]{args.max_turns}[/magenta]",
-            border_style="blue",
-        )
-    )
-
-    try:
-        anthropic_api_key = get_anthropic_api_key()
-        anthropic_base_url = get_anthropic_base_url()
-        auth = get_auth()
-        github_token = await auth.get_token()
-    except RuntimeError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        return 1
-
-    store = Store()
-    container_mgr = ContainerManager()
-
-    store.add_repo(repo_id, repo_url)
-    activity_id = store.add_activity(repo_id, "fix_issue", f"issue:{issue_number}")
-    console.print(f"[dim]Activity: {activity_id}[/dim]\n")
-
-    try:
-        dispatch_task = asyncio.create_task(
-            dispatch(
-                activity_id=activity_id,
-                store=store,
-                container_mgr=container_mgr,
-                anthropic_api_key=anthropic_api_key,
-                github_token=github_token,
-                anthropic_base_url=anthropic_base_url,
-                max_turns=args.max_turns,
-                verbose=args.verbose,
-            )
-        )
-
-        last_log_id = 0
-        while not dispatch_task.done():
-            logs = store.get_logs(activity_id)
-            new_logs = [log for log in logs if log["id"] > last_log_id]
-            for log in new_logs:
-                _print_log_line(log["line"])
-                last_log_id = log["id"]
-            await asyncio.sleep(0.5)
-
-        await dispatch_task
-
-        # Print remaining logs
-        logs = store.get_logs(activity_id)
-        for log in logs:
-            if log["id"] > last_log_id:
-                _print_log_line(log["line"])
-
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted[/yellow]")
-        store.update_activity(activity_id, status="failed", summary="Interrupted by user")
-        return 1
-    except Exception as e:
-        console.print(f"\n[red]Error:[/red] {e}")
-        if args.verbose:
-            import traceback
-            traceback.print_exc()
-        return 1
-
-    activity = store.get_activity(activity_id)
-    if activity is None:
-        return 1
-
-    if activity["status"] == "done":
-        console.print(Panel(
-            f"[bold green]SUCCESS[/bold green]\n\n{activity['summary'] or ''}",
-            border_style="green",
-        ))
-        return 0
-    else:
-        console.print(Panel(
-            f"[bold red]FAILED[/bold red]\n\n{activity['summary'] or ''}",
-            border_style="red",
-        ))
-        return 1
-
-
 # --- status ---
 
 async def cmd_status(args: argparse.Namespace) -> int:
@@ -353,7 +147,7 @@ async def cmd_status(args: argparse.Namespace) -> int:
         # Show all repos and recent activities
         repos = store.list_repos()
         if not repos:
-            console.print("[dim]No repos registered. Run `catocode watch <url>` to start.[/dim]")
+            console.print("[dim]No repos registered. Install the GitHub App and watch a repo to start.[/dim]")
             return 0
 
         for repo in repos:
@@ -483,10 +277,7 @@ async def run_async(args: argparse.Namespace) -> int:
 
     commands = {
         "server": cmd_server,
-        "watch": cmd_watch,
-        "unwatch": cmd_unwatch,
         "daemon": cmd_daemon,
-        "fix": cmd_fix,
         "status": cmd_status,
         "logs": cmd_logs,
     }

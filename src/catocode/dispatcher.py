@@ -132,6 +132,52 @@ def _find_latest_setup_activity(store: "Store", repo_id: str) -> dict | None:
     return None
 
 
+def _call_container_method(method, *args, github_token: str | None = None, **kwargs):
+    if github_token is None:
+        return method(*args, **kwargs)
+    try:
+        return method(*args, github_token=github_token, **kwargs)
+    except TypeError as exc:
+        if "github_token" not in str(exc):
+            raise
+        return method(*args, **kwargs)
+
+
+def _exec_sdk_runner_stream(
+    container_mgr: "ContainerManager",
+    *,
+    prompt: str,
+    cwd: str,
+    max_turns: int,
+    session_id: str | None,
+    github_token: str | None,
+):
+    if github_token is None:
+        return container_mgr.exec_sdk_runner(
+            prompt=prompt,
+            cwd=cwd,
+            max_turns=max_turns,
+            session_id=session_id,
+        )
+    try:
+        return container_mgr.exec_sdk_runner(
+            prompt=prompt,
+            cwd=cwd,
+            max_turns=max_turns,
+            session_id=session_id,
+            github_token=github_token,
+        )
+    except TypeError as exc:
+        if "github_token" not in str(exc):
+            raise
+        return container_mgr.exec_sdk_runner(
+            prompt=prompt,
+            cwd=cwd,
+            max_turns=max_turns,
+            session_id=session_id,
+        )
+
+
 async def _wait_for_activity_completion(
     store: "Store",
     activity_id: str,
@@ -264,15 +310,16 @@ async def dispatch(
                 repo_url=repo_url,
                 store=store,
                 container_mgr=container_mgr,
+                github_token=github_token,
                 verbose=verbose,
             )
             return
 
         # 2. Ensure repo cloned
-        container_mgr.ensure_repo(repo_id, repo_url)
+        _call_container_method(container_mgr.ensure_repo, repo_id, repo_url, github_token=github_token)
 
         # 3. Ensure repo setup is complete before other activity kinds proceed.
-        result = container_mgr.exec("test -f CLAUDE.md", workdir=f"/repos/{repo_id}")
+        result = _call_container_method(container_mgr.exec, "test -f CLAUDE.md", workdir=f"/repos/{repo_id}", github_token=github_token)
         has_claude_md = result.exit_code == 0
         latest_setup = _find_latest_setup_activity(store, repo_id)
         setup_complete = has_claude_md and latest_setup is not None and latest_setup["status"] == "done"
@@ -306,6 +353,7 @@ async def dispatch(
                     repo_url=repo_url,
                     store=store,
                     container_mgr=container_mgr,
+                    github_token=github_token,
                     verbose=verbose,
                 )
                 setup_activity = store.get_activity(setup_activity_id)
@@ -317,6 +365,7 @@ async def dispatch(
                     repo_url=repo_url,
                     store=store,
                     container_mgr=container_mgr,
+                    github_token=github_token,
                     verbose=verbose,
                 )
                 setup_activity = store.get_activity(setup_activity["id"])
@@ -343,7 +392,13 @@ async def dispatch(
                 else None
             )
             if supports_session_worktrees:
-                activity_workdir = container_mgr.ensure_session_worktree(repo_id, repo_url, runtime_session["id"])
+                activity_workdir = _call_container_method(
+                    container_mgr.ensure_session_worktree,
+                    repo_id,
+                    repo_url,
+                    runtime_session["id"],
+                    github_token=github_token,
+                )
                 store.update_runtime_session(
                     runtime_session["id"],
                     worktree_path=activity_workdir,
@@ -368,13 +423,18 @@ async def dispatch(
                     target_ref=(recovery_checkpoint or {}).get("commit_sha"),
                 )
             elif activity["kind"] != "respond_review":
-                container_mgr.reset_repo(repo_id)
+                _call_container_method(container_mgr.reset_repo, repo_id, github_token=github_token)
         elif activity["kind"] != "respond_review":
-            container_mgr.reset_repo(repo_id)
+            _call_container_method(container_mgr.reset_repo, repo_id, github_token=github_token)
 
         # 3.5. Index repo code definitions for non-issue flows that still use store-backed retrieval.
         try:
-            sha_result = container_mgr.exec("git rev-parse HEAD", workdir=activity_workdir)
+            sha_result = _call_container_method(
+                container_mgr.exec,
+                "git rev-parse HEAD",
+                workdir=activity_workdir,
+                github_token=github_token,
+            )
             current_sha = sha_result.stdout.strip() if sha_result.exit_code == 0 else None
             if activity["kind"] not in ("fix_issue", "analyze_issue"):
                 _index_repo_from_container(repo_id, container_mgr, store, current_sha)
@@ -425,6 +485,7 @@ async def dispatch(
                 store=store,
                 container_mgr=container_mgr,
                 max_turns=max_turns,
+                github_token=github_token,
                 session_id=resume_session_id,
                 verbose=verbose,
             )
@@ -643,6 +704,7 @@ async def _run_setup(
     repo_url: str,
     store: Store,
     container_mgr: ContainerManager,
+    github_token: str,
     verbose: bool,
 ) -> None:
     """Run repo setup and mark lifecycle state based on the result."""
@@ -674,7 +736,7 @@ async def _run_setup(
                 current_step,
                 metadata={"attempt": attempt},
             )
-            container_mgr.ensure_repo(repo_id, repo_url)
+            _call_container_method(container_mgr.ensure_repo, repo_id, repo_url, github_token=github_token)
             _finish_activity_step(store, activity_id, current_step, current_step_started_at, "done")
 
             current_step = "init_claude_md"
@@ -692,6 +754,7 @@ async def _run_setup(
                 store=store,
                 container_mgr=container_mgr,
                 max_turns=50,
+                github_token=github_token,
                 verbose=verbose,
             )
             if exit_code != 0:
@@ -708,7 +771,7 @@ async def _run_setup(
                 current_step,
                 metadata={"attempt": attempt},
             )
-            result = container_mgr.exec("cg index .", workdir=repo_workdir)
+            result = _call_container_method(container_mgr.exec, "cg index .", workdir=repo_workdir, github_token=github_token)
             if result.exit_code != 0:
                 detail = result.combined or "cg index failed"
                 raise RuntimeError(detail)
@@ -728,7 +791,12 @@ async def _run_setup(
                 current_step,
                 metadata={"attempt": attempt},
             )
-            result = container_mgr.exec("test -f CLAUDE.md && cg stats --root .", workdir=repo_workdir)
+            result = _call_container_method(
+                container_mgr.exec,
+                "test -f CLAUDE.md && cg stats --root .",
+                workdir=repo_workdir,
+                github_token=github_token,
+            )
             if result.exit_code != 0:
                 detail = result.combined or "health check failed"
                 raise RuntimeError(detail)
@@ -782,7 +850,7 @@ async def _run_setup(
                     RETRY_DELAY_SECS,
                 )
                 if current_step != "clone":
-                    container_mgr.reset_repo(repo_id)
+                    _call_container_method(container_mgr.reset_repo, repo_id, github_token=github_token)
                 await asyncio.sleep(RETRY_DELAY_SECS)
                 continue
 
@@ -1038,6 +1106,7 @@ async def _execute_sdk_runner(
     store: Store,
     container_mgr: ContainerManager,
     max_turns: int,
+    github_token: str,
     session_id: str | None = None,
     verbose: bool = False,
 ) -> tuple[int, str | None, float | None]:
@@ -1068,11 +1137,13 @@ async def _execute_sdk_runner(
 
         last_output_time = asyncio.get_event_loop().time()
 
-        async for line, code in container_mgr.exec_sdk_runner(
+        async for line, code in _exec_sdk_runner_stream(
+            container_mgr,
             prompt=prompt,
             cwd=cwd,
             max_turns=max_turns,
             session_id=session_id,
+            github_token=github_token,
         ):
             now = asyncio.get_event_loop().time()
             idle_secs = now - last_output_time

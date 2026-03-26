@@ -20,32 +20,9 @@ def get_anthropic_base_url() -> str | None:
     return os.environ.get("ANTHROPIC_BASE_URL")
 
 
-def get_github_token() -> str:
-    """Get GitHub token from GITHUB_TOKEN env var or gh CLI."""
-    token = os.environ.get("GITHUB_TOKEN")
-    if token:
-        return token
-
-
 def get_github_app_webhook_secret() -> str | None:
     """Get the GitHub App-level webhook secret (GITHUB_APP_WEBHOOK_SECRET)."""
     return os.environ.get("GITHUB_APP_WEBHOOK_SECRET")
-
-
-def get_github_oauth_client_id() -> str:
-    """Get GitHub OAuth App client ID."""
-    v = os.environ.get("GITHUB_OAUTH_CLIENT_ID")
-    if not v:
-        raise RuntimeError("GITHUB_OAUTH_CLIENT_ID environment variable not set")
-    return v
-
-
-def get_github_oauth_client_secret() -> str:
-    """Get GitHub OAuth App client secret."""
-    v = os.environ.get("GITHUB_OAUTH_CLIENT_SECRET")
-    if not v:
-        raise RuntimeError("GITHUB_OAUTH_CLIENT_SECRET environment variable not set")
-    return v
 
 
 def get_github_app_client_id() -> str:
@@ -156,9 +133,6 @@ class CatoCodeConfig:
     max_turns_per_phase: int = 30
     max_budget_usd: float = 10.0
     output_dir: Path = field(default_factory=lambda: Path("output"))
-    github_token: str | None = field(
-        default_factory=lambda: os.environ.get("GITHUB_TOKEN")
-    )
 
     def __post_init__(self) -> None:
         self.owner, self.repo = parse_repo_url(self.repo_url)

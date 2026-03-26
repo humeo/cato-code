@@ -44,7 +44,7 @@ export default function HomePage() {
               },
               {
                 title: "Three Entry Points",
-                body: "Install App from the web UI, manual GitHub App setup, or `catocode watch` in the CLI.",
+                body: "Connect GitHub, install the App, then choose the repositories you want to watch from the dashboard.",
               },
             ].map((item) => (
               <div key={item.title} className="glass rounded-2xl border border-white/8 p-4">
@@ -70,7 +70,7 @@ export default function HomePage() {
             <div className="mt-5 space-y-3">
               {[
                 "Install the GitHub App or connect an existing installation.",
-                "Watch a repo from the dashboard or run `catocode watch <repo-url>`.",
+                "Choose a visible repository in the dashboard and click Watch.",
                 "Worker container clones the repo, initializes CLAUDE.md, runs `cg index`, and health checks.",
                 "The dashboard shows each step, then the repo becomes ready for analyze/fix sessions.",
               ].map((line, index) => (

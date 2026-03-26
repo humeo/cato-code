@@ -4,13 +4,13 @@ import json
 
 from fastapi.testclient import TestClient
 
-from catocode.auth.token import TokenAuth
 from catocode.store import Store
 from catocode.webhook.server import WebhookServer
+from tests.fakes import StaticAuth
 
 
 def _make_client(store: Store) -> TestClient:
-    auth = TokenAuth("ghp_test")
+    auth = StaticAuth()
     server = WebhookServer(store, auth=auth)
     return TestClient(server.app)
 
@@ -33,7 +33,7 @@ def test_issue_opened_webhook_creates_primary_issue_runtime_session(tmp_path):
     }
 
     resp = client.post(
-        "/webhook/github/owner-repo",
+        "/webhook/app",
         content=json.dumps(payload).encode(),
         headers={
             "X-GitHub-Event": "issues",
@@ -89,7 +89,7 @@ def test_issue_approval_reuses_existing_issue_runtime_session(tmp_path, monkeypa
     }
 
     resp = client.post(
-        "/webhook/github/owner-repo",
+        "/webhook/app",
         content=json.dumps(payload).encode(),
         headers={
             "X-GitHub-Event": "issue_comment",
@@ -125,7 +125,7 @@ def test_merged_pr_refresh_creates_dedicated_runtime_session(tmp_path):
     }
 
     resp = client.post(
-        "/webhook/github/owner-repo",
+        "/webhook/app",
         content=json.dumps(payload).encode(),
         headers={
             "X-GitHub-Event": "pull_request",
@@ -176,7 +176,7 @@ def test_issue_approve_after_analysis_queues_fix_issue_on_same_runtime_session(t
     }
 
     resp = client.post(
-        "/webhook/github/owner-repo",
+        "/webhook/app",
         content=json.dumps(payload).encode(),
         headers={
             "X-GitHub-Event": "issue_comment",

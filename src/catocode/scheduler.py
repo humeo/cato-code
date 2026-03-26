@@ -18,6 +18,7 @@ import signal
 from datetime import datetime, timezone
 
 from .auth import Auth, get_auth
+from .auth.base import GitHubAppTokenProvider
 from .config import get_anthropic_api_key, get_anthropic_base_url, parse_repo_url
 from .container.manager import ContainerManager
 from .container.registry import ContainerRegistry
@@ -64,6 +65,12 @@ class Scheduler:
         if repo_id not in self._repo_locks:
             self._repo_locks[repo_id] = asyncio.Lock()
         return self._repo_locks[repo_id]
+
+    async def _resolve_repo_github_token(self, repo: dict | None) -> str:
+        installation_id = repo.get("installation_id") if repo else None
+        if installation_id and isinstance(self._auth, GitHubAppTokenProvider):
+            return await self._auth.get_installation_token(installation_id)
+        return await self._auth.get_token()
 
     async def run(self) -> None:
         """Start all loops. Runs until SIGTERM/SIGINT or stop() called."""
@@ -152,7 +159,7 @@ class Scheduler:
         number = parts[1]
 
         # Fetch recent comments
-        github_token = await self._auth.get_token()
+        github_token = await self._resolve_repo_github_token(repo)
         if not github_token:
             logger.error("GitHub token not configured")
             return
@@ -374,8 +381,8 @@ class Scheduler:
                     return
 
                 # Resolve container manager: per-user registry or legacy single manager
+                repo = self._store.get_repo(repo_id)
                 if self._registry is not None:
-                    repo = self._store.get_repo(repo_id)
                     user_id = repo.get("user_id") if repo else None
                     if user_id:
                         container_mgr = self._registry.get(user_id)
@@ -391,7 +398,7 @@ class Scheduler:
                         store=self._store,
                         container_mgr=container_mgr,
                         anthropic_api_key=get_anthropic_api_key(),
-                        github_token=await self._auth.get_token(),
+                        github_token=await self._resolve_repo_github_token(repo),
                         anthropic_base_url=get_anthropic_base_url(),
                         verbose=self._verbose,
                     )

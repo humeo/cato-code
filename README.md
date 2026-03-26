@@ -59,23 +59,23 @@ Don't want to self-host? Use the managed version:
 ```bash
 git clone https://github.com/humeo/cato-code.git
 cd cato-code
-cp .env.example .env          # Add ANTHROPIC_API_KEY and GITHUB_TOKEN
+cp .env.example .env          # Add ANTHROPIC_API_KEY and GitHub App credentials
 docker compose up -d
-docker compose exec catocode catocode watch https://github.com/owner/repo
+docker compose exec catocode catocode server --port 8000
 ```
 
-Once running, CatoCode responds to new issues and PRs automatically. Full setup details in [Deployment](#deployment).
+Then open [http://localhost:3000](http://localhost:3000), connect GitHub, install the App, and click `Watch` on a repo. Full setup details in [Deployment](#deployment).
 
 ---
 
 ## See It Work
 
-Issue opens → CatoCode pulls the code, reproduces the bug, posts a comment → you reply `/approve` → CatoCode fixes it, runs tests, opens a PR.
+Install App → click `Watch` → setup runs (`clone -> CLAUDE.md -> cg index -> health check`) → issue opens → CatoCode reproduces the bug, posts a comment → you reply `/approve` → CatoCode fixes it, runs tests, opens a PR.
 
 ```
-# 1. Watch a repo (runs continuously from here on)
-$ docker compose exec catocode catocode watch https://github.com/alice/myproject
-✓ Watching https://github.com/alice/myproject
+# 1. Open the dashboard
+#    Connect GitHub -> Install App -> Watch alice/myproject
+#    The repo moves through setting_up -> ready
 
 # 2. Someone opens an issue:
 #    "Bug: calculate_average() crashes when list is empty"
@@ -247,7 +247,15 @@ Edit `.env`:
 | Variable            | Required | Description                                         |
 | ------------------- | -------- | --------------------------------------------------- |
 | `ANTHROPIC_API_KEY` | Yes      | Anthropic API key                                   |
-| `GITHUB_TOKEN`      | Yes      | GitHub PAT with `repo` scope                        |
+| `GITHUB_APP_ID` | Yes | GitHub App ID |
+| `GITHUB_APP_CLIENT_ID` | Yes | GitHub App client ID used for login/install |
+| `GITHUB_APP_CLIENT_SECRET` | Yes | GitHub App client secret used for login/install |
+| `GITHUB_APP_PRIVATE_KEY` | Yes | GitHub App private key PEM |
+| `GITHUB_APP_WEBHOOK_SECRET` | Yes | Secret used to verify `/webhook/app` |
+| `GITHUB_APP_NAME` | Yes | GitHub App slug used for Install App URL |
+| `CATOCODE_BASE_URL` | Yes | Backend base URL, e.g. `https://catocode.example.com` |
+| `FRONTEND_URL` | Yes | Frontend base URL, e.g. `https://app.catocode.example.com` |
+| `SESSION_SECRET_KEY` | Yes | Session + token encryption secret |
 | `PORT`              |          | Service port (default: `8000`)                      |
 | `GIT_USER_NAME`     |          | Commit author name (default: `CatoCode`)            |
 | `GIT_USER_EMAIL`    |          | Commit author email (default: `catocode@bot.local`) |
@@ -268,19 +276,22 @@ docker compose up -d
 
 First run builds Docker images (~5-10 min). Subsequent starts use the cache. The service runs continuously and processes events automatically.
 
-### 3. Watch a Repo
+### 3. Connect GitHub and Install the App
 
-```bash
-docker compose exec catocode catocode watch https://github.com/owner/repo
-```
+1. Open [http://localhost:3000](http://localhost:3000)
+2. Click `Connect GitHub`
+3. Authorize the platform GitHub App
+4. Click `Install App`
+5. Install it on a personal account or organization
+6. Return to the dashboard and click `Watch` on the repositories you want CatoCode to manage
 
-Multiple repos are supported — each is managed independently with per-repo serial execution.
+Multiple repos are supported. Installation only makes them visible; `Watch` is the explicit opt-in that queues setup.
 
 ### 4. Dashboard
 
 The dashboard starts automatically with `docker compose up -d`. Open [http://localhost:3000](http://localhost:3000).
 
-Features: real-time activity feed (5s polling), live log streaming (SSE), patrol configuration, cost tracking.
+Features: real-time activity feed (5s polling), live log streaming (SSE), watch/setup lifecycle, patrol configuration, cost tracking.
 
 > To point at a remote backend, set `NEXT_PUBLIC_API_URL=http://your-server:8000` in `.env`, then run `docker compose up -d --build frontend`.
 
@@ -307,24 +318,15 @@ In GitHub repo **Settings → Webhooks**, add:
 ## CLI Reference
 
 ```bash
-# Watch a repo (register and start continuous monitoring)
-catocode watch https://github.com/owner/repo
+# Run the unified GitHub App SaaS server
+catocode server --port 8000
 
-# Stop watching
-catocode unwatch https://github.com/owner/repo
-
-# Fix an issue immediately (blocking, streams logs in real time)
-catocode fix https://github.com/owner/repo/issues/42
-
-# View watched repos and recent activity
+# View repos and recent activity
 catocode status
 
 # View activity logs (supports 8-char short ID)
 catocode logs <activity_id>
 catocode logs <activity_id> --follow   # Stream in real time
-
-# SaaS mode: unified server with OAuth + API + webhooks
-catocode server --port 8000
 
 # CLI mode: scheduler + optional webhook server
 catocode daemon --webhook-port 8080
@@ -342,7 +344,7 @@ uv sync --dev                            # Install dependencies
 uv run pytest                            # Run unit tests
 uv run pytest --cov=src/catocode         # With coverage
 uv run pytest -m integration             # Integration tests (requires Docker)
-uv run pytest -m e2e                     # End-to-end (requires Docker + GITHUB_TOKEN)
+uv run pytest -m e2e                     # End-to-end (requires Docker + GitHub App test credentials)
 uv run ruff check src/ --fix             # Lint + auto-fix
 cd frontend && bun install && bun dev    # Frontend dev server
 ```
@@ -357,7 +359,7 @@ src/catocode/
 ├── skill_renderer.py      # Markdown template → prompt builder
 ├── store.py               # 12 tables, 55+ data methods
 ├── db.py                  # SQLite/PostgreSQL dual-backend abstraction
-├── auth/                  # GitHub App + PAT factory pattern
+├── auth/                  # GitHub App auth services and token minting
 ├── api/                   # FastAPI routes, OAuth, session management
 ├── webhook/               # Event ingestion, HMAC verification, dedup
 ├── decision/              # Event → skill routing, admin permission checks

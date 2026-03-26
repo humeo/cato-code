@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from ..config import get_github_app_name, parse_repo_url
+from ..config import get_github_app_name, get_patrol_config, parse_repo_url
 from ..github.permissions import check_repo_write_access
 from ..store import Store
 from .crypto import decrypt_token
@@ -82,6 +82,33 @@ def _find_reusable_setup_activity(store: Store, repo_id: str) -> dict | None:
             continue
         return activity
     return None
+
+
+def _queue_repo_setup(store: Store, repo_id: str, trigger: str) -> tuple[str | None, str]:
+    repo = store.get_repo(repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    store.update_repo(repo_id, watch=1)
+    patrol_cfg = get_patrol_config()
+    store.init_patrol_budget(repo_id, patrol_cfg.max_issues, patrol_cfg.window_hours)
+
+    if repo.get("lifecycle_status") == "ready":
+        return None, "ready"
+
+    active_setup = _find_reusable_setup_activity(store, repo_id)
+    if active_setup is not None:
+        activity_id = active_setup["id"]
+    else:
+        activity_id = store.add_activity(repo_id, "setup", trigger)
+
+    store.update_repo_lifecycle(
+        repo_id,
+        lifecycle_status="setting_up",
+        last_error=None,
+        last_setup_activity_id=activity_id,
+    )
+    return activity_id, "queued"
 
 
 def _get_user_github_token(current_user: dict) -> str:
@@ -210,6 +237,19 @@ def make_router(store: Store) -> APIRouter:
             last_setup_activity_id=activity_id,
         )
         return {"status": "queued", "activity_id": activity_id}
+
+    @r.post("/repos/{repo_id}/watch")
+    async def watch_repo(repo_id: str, current_user: CurrentUser) -> dict:
+        await _require_visible_repo(store, repo_id, current_user)
+        activity_id, status = _queue_repo_setup(store, repo_id, "watch")
+        return {"status": status, "activity_id": activity_id}
+
+    @r.delete("/repos/{repo_id}/watch")
+    async def unwatch_repo(repo_id: str, current_user: CurrentUser) -> dict:
+        await _require_visible_repo(store, repo_id, current_user)
+        store.update_repo(repo_id, watch=0)
+        store.update_repo_lifecycle(repo_id, lifecycle_status="watched")
+        return {"status": "unwatched"}
 
     @r.get("/repos/{repo_id}/activities")
     async def list_repo_activities(repo_id: str, current_user: CurrentUser) -> list[dict]:
