@@ -2,94 +2,79 @@
 
 from __future__ import annotations
 
-import os
 import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from catocode.auth import get_auth
-from catocode.auth.token import TokenAuth
+from catocode.auth import get_github_app_auth
 from catocode.auth.github_app import GitHubAppAuth
+from catocode.config import (
+    get_github_app_client_id,
+    get_github_app_client_secret,
+)
+
+# --- SaaS config getters ---
+
+def test_get_github_app_client_id(monkeypatch):
+    monkeypatch.setenv("GITHUB_APP_CLIENT_ID", "Iv1.testclient")
+    assert get_github_app_client_id() == "Iv1.testclient"
 
 
-# --- TokenAuth ---
-
-@pytest.mark.asyncio
-async def test_token_auth_returns_token():
-    auth = TokenAuth("ghp_test123")
-    assert await auth.get_token() == "ghp_test123"
+def test_get_github_app_client_secret(monkeypatch):
+    monkeypatch.setenv("GITHUB_APP_CLIENT_SECRET", "test-secret")
+    assert get_github_app_client_secret() == "test-secret"
 
 
-def test_token_auth_type():
-    auth = TokenAuth("ghp_test123")
-    assert auth.auth_type() == "token"
+# --- App auth factory ---
 
-
-# --- get_auth factory ---
-
-def test_get_auth_uses_token(monkeypatch):
-    monkeypatch.setenv("GITHUB_TOKEN", "ghp_abc")
-    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
-    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
-    monkeypatch.delenv("GITHUB_APP_INSTALLATION_ID", raising=False)
-
-    auth = get_auth()
-    assert isinstance(auth, TokenAuth)
-    assert auth.auth_type() == "token"
-
-
-def test_get_auth_uses_github_app(monkeypatch):
+def test_get_github_app_auth_uses_global_app_credentials(monkeypatch):
     monkeypatch.setenv("GITHUB_APP_ID", "123456")
     monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----")
-    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "789")
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
-    auth = get_auth()
+    auth = get_github_app_auth()
     assert isinstance(auth, GitHubAppAuth)
     assert auth.auth_type() == "github_app"
+    assert auth._installation_id is None
 
 
-def test_get_auth_prefers_app_over_token(monkeypatch):
-    """GitHub App credentials take priority over GITHUB_TOKEN."""
+def test_get_github_app_auth_ignores_github_token(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_abc")
     monkeypatch.setenv("GITHUB_APP_ID", "123456")
     monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----")
-    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "789")
 
-    auth = get_auth()
+    auth = get_github_app_auth()
     assert isinstance(auth, GitHubAppAuth)
+    assert auth._installation_id is None
 
 
-def test_get_auth_raises_when_no_credentials(monkeypatch):
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+def test_get_github_app_auth_raises_when_missing_credentials(monkeypatch):
     monkeypatch.delenv("GITHUB_APP_ID", raising=False)
     monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
-    monkeypatch.delenv("GITHUB_APP_INSTALLATION_ID", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
-    with pytest.raises(RuntimeError, match="No GitHub credentials"):
-        get_auth()
+    with pytest.raises(RuntimeError, match="GitHub App credentials"):
+        get_github_app_auth()
 
 
 # --- GitHubAppAuth token caching ---
 
 @pytest.mark.asyncio
 async def test_github_app_caches_token(monkeypatch):
-    """get_token() should return cached token without hitting the API again."""
-    auth = GitHubAppAuth("123", "fake-key", "456")
+    """get_installation_token() should return cached token without hitting the API again."""
+    auth = GitHubAppAuth("123", "fake-key")
 
     # Pre-populate the cache with a token that won't expire soon
-    auth._cached_token = "ghs_cached"
-    auth._expires_at = time.time() + 3600  # Valid for 1 hour
+    auth._cached_tokens["456"] = ("ghs_cached", time.time() + 3600)
 
-    token = await auth.get_token()
+    token = await auth.get_installation_token("456")
     assert token == "ghs_cached"
 
 
 @pytest.mark.asyncio
 async def test_github_app_refreshes_expired_token(monkeypatch):
     """get_token() should fetch a new token when cached one is about to expire."""
-    auth = GitHubAppAuth("123", "fake-key", "456")
+    auth = GitHubAppAuth("123", "fake-key")
 
     # Simulate expired cache
     auth._cached_token = "ghs_old"
@@ -106,7 +91,7 @@ async def test_github_app_refreshes_expired_token(monkeypatch):
 
     with patch("catocode.auth.github_app.GitHubAppAuth._make_jwt", return_value="jwt"), \
          patch("httpx.AsyncClient.post", mock_post):
-        token = await auth.get_token()
+        token = await auth.get_installation_token("456")
 
     assert token == new_token
-    assert auth._cached_token == new_token
+    assert auth._cached_tokens["456"][0] == new_token

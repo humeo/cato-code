@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS oauth_states (
 CREATE TABLE IF NOT EXISTS repos (
     id TEXT PRIMARY KEY,
     repo_url TEXT NOT NULL,
+    installation_id TEXT,
     watch INTEGER DEFAULT 0,
     lifecycle_status TEXT DEFAULT 'watched',
     last_etag TEXT,
@@ -277,6 +278,7 @@ _MIGRATIONS = [
     "ALTER TABLE repos ADD COLUMN last_ready_at TEXT",
     "ALTER TABLE repos ADD COLUMN last_error TEXT",
     "ALTER TABLE repos ADD COLUMN last_setup_activity_id TEXT",
+    "ALTER TABLE repos ADD COLUMN installation_id TEXT",
     "ALTER TABLE activities ADD COLUMN requires_approval INTEGER DEFAULT 0",
     "ALTER TABLE activities ADD COLUMN approval_comment_url TEXT",
     "ALTER TABLE activities ADD COLUMN approved_by TEXT",
@@ -559,6 +561,29 @@ class Store:
     def delete_repo(self, repo_id: str) -> None:
         self._db.execute("DELETE FROM repos WHERE id = ?", (repo_id,))
         self._db.commit()
+
+    def bind_repo_installation(self, repo_id: str, installation_id: str) -> None:
+        self._db.execute(
+            "UPDATE repos SET installation_id = ? WHERE id = ?",
+            (installation_id, repo_id),
+        )
+        self._db.commit()
+
+    def clear_repo_installation(self, repo_id: str) -> None:
+        self._db.execute(
+            "UPDATE repos SET installation_id = NULL WHERE id = ?",
+            (repo_id,),
+        )
+        self._db.commit()
+
+    def get_repo_installation_id(self, repo_id: str) -> str | None:
+        row = self._db.execute_one(
+            "SELECT installation_id FROM repos WHERE id = ?",
+            (repo_id,),
+        )
+        if row is None:
+            return None
+        return row["installation_id"]
 
     # --- activities ---
 

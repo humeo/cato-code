@@ -16,7 +16,7 @@ from datetime import datetime
 import httpx
 import jwt
 
-from .base import Auth
+from .base import Auth, GitHubAppTokenProvider
 
 logger = logging.getLogger(__name__)
 
@@ -25,20 +25,20 @@ GITHUB_API = "https://api.github.com"
 REFRESH_BUFFER_SECS = 60
 
 
-class GitHubAppAuth(Auth):
-    """Auth using a GitHub App installation token."""
+class GitHubAppAuth(Auth, GitHubAppTokenProvider):
+    """App-scoped auth that can mint installation tokens on demand."""
 
     def __init__(
         self,
         app_id: str,
         private_key_pem: str,
-        installation_id: str,
+        installation_id: str | None = None,
     ) -> None:
         """
         Args:
             app_id: GitHub App ID (numeric string).
             private_key_pem: PEM-encoded RSA private key downloaded from GitHub.
-            installation_id: Installation ID for the target account/org.
+            installation_id: Optional default installation ID for legacy call sites.
         """
         self._app_id = app_id
         self._private_key = private_key_pem
@@ -46,6 +46,7 @@ class GitHubAppAuth(Auth):
 
         self._cached_token: str | None = None
         self._expires_at: float = 0.0
+        self._cached_tokens: dict[str, tuple[str, float]] = {}
         self._lock = asyncio.Lock()
 
     def _make_jwt(self) -> str:
@@ -58,13 +59,13 @@ class GitHubAppAuth(Auth):
         }
         return jwt.encode(payload, self._private_key, algorithm="RS256")
 
-    async def _fetch_installation_token(self) -> tuple[str, float]:
+    async def _fetch_installation_token(self, installation_id: str) -> tuple[str, float]:
         """Fetch a new installation access token from GitHub.
 
         Returns (token, expires_at_timestamp).
         """
         app_jwt = self._make_jwt()
-        url = f"{GITHUB_API}/app/installations/{self._installation_id}/access_tokens"
+        url = f"{GITHUB_API}/app/installations/{installation_id}/access_tokens"
         headers = {
             "Authorization": f"Bearer {app_jwt}",
             "Accept": "application/vnd.github+json",
@@ -84,18 +85,29 @@ class GitHubAppAuth(Auth):
         )
         return token, expires_at_ts
 
-    async def get_token(self) -> str:
+    async def get_installation_token(self, installation_id: str) -> str:
         """Return a valid installation token, refreshing if necessary."""
         async with self._lock:
-            if self._cached_token and time.time() < self._expires_at - REFRESH_BUFFER_SECS:
-                return self._cached_token
+            cached = self._cached_tokens.get(installation_id)
+            if cached and time.time() < cached[1] - REFRESH_BUFFER_SECS:
+                return cached[0]
 
             logger.debug(
                 "Refreshing GitHub App installation token for installation %s",
-                self._installation_id,
+                installation_id,
             )
-            self._cached_token, self._expires_at = await self._fetch_installation_token()
-            return self._cached_token
+            token, expires_at = await self._fetch_installation_token(installation_id)
+            self._cached_tokens[installation_id] = (token, expires_at)
+            if self._installation_id == installation_id:
+                self._cached_token = token
+                self._expires_at = expires_at
+            return token
+
+    async def get_token(self) -> str:
+        """Legacy compatibility: use the default installation if configured."""
+        if not self._installation_id:
+            raise RuntimeError("No default installation configured for get_token(); use get_installation_token()")
+        return await self.get_installation_token(self._installation_id)
 
     def auth_type(self) -> str:
         return "github_app"

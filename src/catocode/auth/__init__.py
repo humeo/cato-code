@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
-import os
-
-from .base import Auth
+from ..config import get_github_app_client_id, get_github_app_client_secret  # noqa: F401
+from .base import Auth, GitHubAppTokenProvider
 from .github_app import GitHubAppAuth
 from .token import TokenAuth
 
-__all__ = ["Auth", "TokenAuth", "GitHubAppAuth", "get_auth"]
+__all__ = ["Auth", "GitHubAppTokenProvider", "TokenAuth", "GitHubAppAuth", "get_auth", "get_github_app_auth"]
+
+
+def get_github_app_auth() -> GitHubAppAuth:
+    """Return the platform GitHub App auth service."""
+    import os
+
+    app_id = os.environ.get("GITHUB_APP_ID")
+    private_key = os.environ.get("GITHUB_APP_PRIVATE_KEY", "").replace("\\n", "\n")
+    if app_id and private_key:
+        return GitHubAppAuth(app_id, private_key)
+
+    raise RuntimeError(
+        "GitHub App credentials not found.\n"
+        "Set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY"
+    )
 
 
 def get_auth() -> Auth:
@@ -22,20 +36,15 @@ def get_auth() -> Auth:
     Raises:
         RuntimeError: if neither set of credentials is available.
     """
-    app_id = os.environ.get("GITHUB_APP_ID")
-    private_key = os.environ.get("GITHUB_APP_PRIVATE_KEY", "").replace("\\n", "\n")
-    installation_id = os.environ.get("GITHUB_APP_INSTALLATION_ID")
+    import os
 
-    if app_id and private_key and installation_id:
-        return GitHubAppAuth(app_id, private_key, installation_id)
+    installation_id = os.environ.get("GITHUB_APP_INSTALLATION_ID")
+    if installation_id:
+        app_auth = get_github_app_auth()
+        return GitHubAppAuth(app_auth._app_id, app_auth._private_key, installation_id)
 
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         return TokenAuth(token)
 
-    raise RuntimeError(
-        "No GitHub credentials found.\n"
-        "  Option A (personal token): set GITHUB_TOKEN\n"
-        "  Option B (GitHub App):     set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, "
-        "GITHUB_APP_INSTALLATION_ID"
-    )
+    return get_github_app_auth()

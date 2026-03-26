@@ -202,3 +202,32 @@ def test_store_installation_crud(tmp_path):
 
     store.delete_installation("999")
     assert store.get_installation("999") is None
+
+
+def test_store_repo_installation_binding_round_trip(tmp_path):
+    store = _make_store(tmp_path)
+    store.add_repo("myorg-repo-a", "https://github.com/myorg/repo-a")
+
+    store.bind_repo_installation("myorg-repo-a", "111")
+
+    assert store.get_repo_installation_id("myorg-repo-a") == "111"
+
+
+def test_store_repo_installation_binding_can_be_reassigned(tmp_path):
+    store = _make_store(tmp_path)
+    store.add_repo("myorg-repo-a", "https://github.com/myorg/repo-a")
+
+    store.bind_repo_installation("myorg-repo-a", "111")
+    store.bind_repo_installation("myorg-repo-a", "222")
+
+    assert store.get_repo_installation_id("myorg-repo-a") == "222"
+
+
+def test_store_repo_installation_binding_can_be_cleared(tmp_path):
+    store = _make_store(tmp_path)
+    store.add_repo("myorg-repo-a", "https://github.com/myorg/repo-a")
+    store.bind_repo_installation("myorg-repo-a", "111")
+
+    store.clear_repo_installation("myorg-repo-a")
+
+    assert store.get_repo_installation_id("myorg-repo-a") is None

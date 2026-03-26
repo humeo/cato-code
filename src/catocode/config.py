@@ -48,6 +48,22 @@ def get_github_oauth_client_secret() -> str:
     return v
 
 
+def get_github_app_client_id() -> str:
+    """Get GitHub App client ID used for OAuth/web login."""
+    v = os.environ.get("GITHUB_APP_CLIENT_ID")
+    if not v:
+        raise RuntimeError("GITHUB_APP_CLIENT_ID environment variable not set")
+    return v
+
+
+def get_github_app_client_secret() -> str:
+    """Get GitHub App client secret used for OAuth/web login."""
+    v = os.environ.get("GITHUB_APP_CLIENT_SECRET")
+    if not v:
+        raise RuntimeError("GITHUB_APP_CLIENT_SECRET environment variable not set")
+    return v
+
+
 def get_session_secret_key() -> str:
     """Get session secret key (32+ byte hex) for Fernet encryption and session signing."""
     v = os.environ.get("SESSION_SECRET_KEY")
