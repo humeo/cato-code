@@ -73,6 +73,7 @@ def test_installation_created_watches_repos(tmp_path):
     # Repos are registered and watched
     assert store.get_repo("myorg-repo-a") is not None
     assert store.get_repo("myorg-repo-a")["watch"] == 1
+    assert store.get_repo_installation_id("myorg-repo-a") == "111"
     assert store.get_installation("111") is not None
 
 
@@ -121,6 +122,10 @@ def test_installation_repositories_added(tmp_path):
 
     payload = {
         "action": "added",
+        "installation": {
+            "id": 444,
+            "account": {"login": "myorg", "type": "Organization"},
+        },
         "repositories_added": [{"full_name": "myorg/new-repo"}],
         "repositories_removed": [],
     }
@@ -139,17 +144,23 @@ def test_installation_repositories_added(tmp_path):
     data = resp.json()
     assert "myorg-new-repo" in data["watched"]
     assert store.get_repo("myorg-new-repo")["watch"] == 1
+    assert store.get_repo_installation_id("myorg-new-repo") == "444"
 
 
 def test_installation_repositories_removed(tmp_path):
     store = _make_store(tmp_path)
     store.add_repo("myorg-old-repo", "https://github.com/myorg/old-repo")
     store.update_repo("myorg-old-repo", watch=1)
+    store.bind_repo_installation("myorg-old-repo", "555")
 
     client = _make_client(store)
 
     payload = {
         "action": "removed",
+        "installation": {
+            "id": 555,
+            "account": {"login": "myorg", "type": "Organization"},
+        },
         "repositories_added": [],
         "repositories_removed": [{"full_name": "myorg/old-repo"}],
     }
@@ -168,6 +179,7 @@ def test_installation_repositories_removed(tmp_path):
     data = resp.json()
     assert "myorg-old-repo" in data["unwatched"]
     assert store.get_repo("myorg-old-repo")["watch"] == 0
+    assert store.get_repo_installation_id("myorg-old-repo") is None
 
 
 # --- Deduplication ---

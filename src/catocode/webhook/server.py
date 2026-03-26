@@ -643,6 +643,7 @@ class WebhookServer:
                 owner, repo_name = repo_info["full_name"].split("/", 1)
                 self._store.add_repo(repo_id, repo_url)
                 self._store.update_repo(repo_id, watch=1)
+                self._store.bind_repo_installation(repo_id, installation_id)
                 # Link repo to user if installation is associated with one
                 user_id = self._store.get_user_id_for_installation(installation_id)
                 if user_id:
@@ -663,6 +664,7 @@ class WebhookServer:
             ]
             for repo_id in watched_repos:
                 self._store.update_repo(repo_id, watch=0)
+                self._store.clear_repo_installation(repo_id)
             self._store.delete_installation(installation_id)
             self._store.mark_webhook_event_processed(delivery_id)
             logger.info("App uninstalled by %s, unwatched %d repos", account_login, len(watched_repos))
@@ -698,6 +700,8 @@ class WebhookServer:
             owner, repo_name = repo_info["full_name"].split("/", 1)
             self._store.add_repo(repo_id, repo_url)
             self._store.update_repo(repo_id, watch=1)
+            if installation_id:
+                self._store.bind_repo_installation(repo_id, installation_id)
             if user_id:
                 self._store.update_repo(repo_id, user_id=user_id)
             watched.append(repo_id)
@@ -710,6 +714,7 @@ class WebhookServer:
             repo_url = f"https://github.com/{repo_info['full_name']}"
             repo_id = repo_id_from_url(repo_url)
             self._store.update_repo(repo_id, watch=0)
+            self._store.clear_repo_installation(repo_id)
             unwatched.append(repo_id)
             logger.info("Auto-unwatched repo removed from installation: %s", repo_id)
 

@@ -15,11 +15,11 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from ..config import (
     get_base_url,
     get_frontend_url,
-    get_github_oauth_client_id,
-    get_github_oauth_client_secret,
+    get_github_app_client_id,
+    get_github_app_client_secret,
 )
 from ..store import Store
-from .crypto import encrypt_token
+from .crypto import decrypt_token, encrypt_token
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,30 @@ def _get_store(request: Request) -> Store:
     return request.app.state.store
 
 
+async def _fetch_visible_installation(access_token: str, installation_id: str) -> dict | None:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://api.github.com/user/installations",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            timeout=10.0,
+        )
+
+    if response.status_code != 200:
+        logger.error("Failed to fetch user installations: %s", response.status_code)
+        raise HTTPException(status_code=502, detail="Failed to fetch GitHub installations")
+
+    installations = response.json().get("installations", [])
+    installation_id_int = int(installation_id)
+    for installation in installations:
+        if installation.get("id") == installation_id_int:
+            return installation
+    return None
+
+
 @router.get("/github")
 async def github_login(request: Request) -> RedirectResponse:
     """Redirect to GitHub OAuth authorization page."""
@@ -40,7 +64,7 @@ async def github_login(request: Request) -> RedirectResponse:
     state = secrets.token_hex(32)
     store.create_oauth_state(state)
 
-    client_id = get_github_oauth_client_id()
+    client_id = get_github_app_client_id()
     base_url = get_base_url()
     redirect_uri = f"{base_url}/auth/github/callback"
 
@@ -65,8 +89,8 @@ async def github_callback(code: str, state: str, request: Request) -> RedirectRe
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
     # Exchange code for access token
-    client_id = get_github_oauth_client_id()
-    client_secret = get_github_oauth_client_secret()
+    client_id = get_github_app_client_id()
+    client_secret = get_github_app_client_secret()
 
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(
@@ -157,6 +181,20 @@ async def github_install_callback(
     if state:
         user_id = store.consume_install_state(state)
         if user_id:
+            user = store.get_user(user_id)
+            if user is None:
+                raise HTTPException(status_code=401, detail="User not found for installation callback")
+            access_token = decrypt_token(user["access_token"])
+            visible_installation = await _fetch_visible_installation(access_token, installation_id)
+            if visible_installation is None:
+                raise HTTPException(status_code=403, detail="Installation is not visible to the current user")
+
+            account = visible_installation.get("account", {})
+            store.add_installation(
+                installation_id,
+                account.get("login", ""),
+                account.get("type", "User"),
+            )
             store.link_installation_to_user(installation_id, user_id)
             logger.info("Linked installation %s to user %s", installation_id, user_id[:8])
         else:
