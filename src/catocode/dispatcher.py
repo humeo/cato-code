@@ -1150,6 +1150,7 @@ async def _execute_sdk_runner(
     result_cost_usd: float | None = None
 
     log_batch: list[str] = []
+    line_buffer = ""
 
     async def _flush_batch() -> None:
         nonlocal log_batch
@@ -1158,8 +1159,28 @@ async def _execute_sdk_runner(
                 store.add_log(activity_id, line)
             log_batch = []
 
+    async def _process_stream_line(raw_line: str) -> None:
+        nonlocal line_count, result_session_id, result_cost_usd
+        if raw_line == "":
+            return
+        log_batch.append(raw_line)
+        line_count += 1
+        await _flush_batch()
+
+        if raw_line.strip().startswith("{"):
+            try:
+                obj = json.loads(raw_line)
+                if obj.get("type") == "result":
+                    result_session_id = obj.get("session_id")
+                    result_cost_usd = obj.get("cost_usd")
+            except json.JSONDecodeError:
+                pass
+
+        if verbose:
+            logger.debug("[%s] %s", activity_id[:8], raw_line.rstrip())
+
     async def _stream_with_idle_timeout() -> tuple[int, str | None, float | None]:
-        nonlocal line_count, exit_code, result_session_id, result_cost_usd
+        nonlocal exit_code, line_buffer
 
         last_output_time = asyncio.get_event_loop().time()
 
@@ -1182,28 +1203,17 @@ async def _execute_sdk_runner(
 
             if line is not None:
                 last_output_time = now
-                log_batch.append(line)
-                line_count += 1
-
-                # Flush every line for real-time log streaming in the dashboard
-                await _flush_batch()
-
-                # Extract session_id and cost from result line
-                if line.strip().startswith("{"):
-                    try:
-                        obj = json.loads(line)
-                        if obj.get("type") == "result":
-                            result_session_id = obj.get("session_id")
-                            result_cost_usd = obj.get("cost_usd")
-                    except json.JSONDecodeError:
-                        pass
-
-                if verbose:
-                    logger.debug("[%s] %s", activity_id[:8], line.rstrip())
+                line_buffer += line
+                while "\n" in line_buffer:
+                    complete_line, line_buffer = line_buffer.split("\n", 1)
+                    await _process_stream_line(complete_line + "\n")
             else:
                 # Sentinel: exit code (code=0 is success, None means unknown → fail)
                 exit_code = code if code is not None else 1
 
+        if line_buffer:
+            await _process_stream_line(line_buffer)
+            line_buffer = ""
         await _flush_batch()
         logger.info(
             "SDK runner completed: exit=%d lines=%d session=%s cost=$%.4f",

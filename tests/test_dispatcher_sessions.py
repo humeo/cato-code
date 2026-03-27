@@ -318,6 +318,61 @@ async def test_dispatch_respond_review_reuses_linked_pr_runtime_session(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_execute_sdk_runner_reassembles_chunked_jsonl(monkeypatch, tmp_path):
+    from catocode.dispatcher import _execute_sdk_runner, _extract_activity_result_envelope
+
+    store = Store(db_path=tmp_path / "test.db")
+    _seed_ready_repo(store)
+    activity_id = store.add_activity("owner-repo", "fix_issue", "issue:42")
+
+    result = ActivityResultEnvelope(
+        status="done",
+        summary="Created PR and captured evidence.",
+        session={"sdk_session_id": "sdk-chunked", "continued": True},
+        writebacks=[{"kind": "pull_request", "pr_number": 55, "url": "https://github.com/owner/repo/pull/55"}],
+        artifacts={"verification": {"status": "passed", "summary": "pytest -q"}},
+        metrics={"cost_usd": 0.7},
+    )
+    payload = json.dumps(
+        {
+            "type": "result",
+            "result": json.dumps(result.to_dict()),
+            "session_id": "sdk-chunked",
+            "cost_usd": 0.7,
+        }
+    )
+    split_at = len(payload) // 2
+
+    async def fake_stream(*args, **kwargs):
+        yield payload[:split_at], None
+        yield payload[split_at:] + "\n", None
+        yield None, 0
+
+    monkeypatch.setattr("catocode.dispatcher._exec_sdk_runner_stream", fake_stream)
+
+    exit_code, session_id, cost_usd = await _execute_sdk_runner(
+        activity_id=activity_id,
+        repo_id="owner-repo",
+        prompt="chunked prompt",
+        cwd="/repos/owner-repo",
+        store=store,
+        container_mgr=object(),
+        max_turns=10,
+        github_token="ghp-token",
+    )
+
+    logs = store.get_logs(activity_id)
+    assert exit_code == 0
+    assert session_id == "sdk-chunked"
+    assert cost_usd == 0.7
+    assert len(logs) == 1
+    assert json.loads(logs[0]["line"])["type"] == "result"
+    parsed = _extract_activity_result_envelope(logs)
+    assert parsed is not None
+    assert parsed.summary == "Created PR and captured evidence."
+
+
+@pytest.mark.asyncio
 async def test_dispatch_fix_issue_creates_runtime_session_when_activity_missing_one(monkeypatch, tmp_path):
     from catocode.dispatcher import dispatch
 
