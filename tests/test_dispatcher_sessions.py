@@ -608,3 +608,84 @@ async def test_dispatch_fix_issue_threads_installation_token_to_container_runtim
     assert container_mgr.ensure_repo_tokens == ["ghs_installation_token"]
     assert container_mgr.ensure_session_worktree_tokens == ["ghs_installation_token"]
     assert container_mgr.exec_sdk_runner_tokens == ["ghs_installation_token"]
+
+
+def test_extract_summary_prefers_latest_result_even_with_trailing_traceback():
+    from catocode.dispatcher import _extract_summary
+
+    result_text = "✅ Issue #30 fixed\n\nPR created: https://github.com/owner/repo/pull/31"
+    logs = [
+        {"line": json.dumps({"type": "log", "message": "working"})},
+        {"line": json.dumps({"type": "result", "result": result_text})},
+    ]
+    logs.extend(
+        {"line": f"traceback line {i}"} for i in range(12)
+    )
+
+    assert _extract_summary(logs) == result_text[:500]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_fix_issue_links_pr_from_plain_result_text_when_envelope_missing(monkeypatch, tmp_path):
+    from catocode.dispatcher import dispatch
+
+    store = Store(db_path=tmp_path / "test.db")
+    _seed_ready_repo(store)
+    runtime_session_id = store.create_runtime_session(
+        repo_id="owner-repo",
+        entry_kind="fix_issue",
+        status="active",
+        worktree_path="/repos/.worktrees/owner-repo/runtime-session-plain-result",
+        branch_name="catocode/session/runtime-session-plain-result",
+        issue_number=42,
+        sdk_session_id="sdk-old",
+    )
+    activity_id = store.add_activity("owner-repo", "fix_issue", "issue:42")
+    store.update_activity(activity_id, session_id=runtime_session_id)
+    container_mgr = SessionAwareContainerManager("/repos/.worktrees/owner-repo/runtime-session-plain-result")
+
+    monkeypatch.setattr("catocode.dispatcher._build_prompt", AsyncMock(return_value="fix prompt"))
+    monkeypatch.setattr("catocode.dispatcher._index_repo_from_container", lambda *args, **kwargs: None)
+    monkeypatch.setattr("catocode.dispatcher.prepare_codebase_graph_runtime", lambda *args, **kwargs: None)
+
+    async def fake_execute_sdk_runner(**kwargs):
+        result_text = (
+            "✅ Issue #30 fixed\n\n"
+            "PR created: https://github.com/owner/repo/pull/31\n\n"
+            "```json\n"
+            '{"activity_id":"abc","session_id":"sdk-new","status":"done"}\n'
+            "```"
+        )
+        store.add_log(
+            kwargs["activity_id"],
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": result_text,
+                    "session_id": "sdk-new",
+                    "cost_usd": 0.3,
+                }
+            ),
+        )
+        for idx in range(12):
+            store.add_log(kwargs["activity_id"], f"traceback line {idx}")
+        return 0, "sdk-new", 0.3
+
+    monkeypatch.setattr("catocode.dispatcher._execute_sdk_runner", fake_execute_sdk_runner)
+
+    await dispatch(
+        activity_id=activity_id,
+        store=store,
+        container_mgr=container_mgr,
+        anthropic_api_key="sk-ant",
+        github_token="ghp-token",
+        verbose=False,
+    )
+
+    activity = store.get_activity(activity_id)
+    assert activity is not None
+    assert activity["status"] == "done"
+    assert activity["summary"].startswith("✅ Issue #30 fixed")
+    linked_pr_session = store.find_pr_runtime_session("owner-repo", 31)
+    assert linked_pr_session is not None
+    assert linked_pr_session["id"] == runtime_session_id

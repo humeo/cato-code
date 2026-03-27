@@ -538,6 +538,7 @@ async def dispatch(
         summary_logs = final_attempt_logs if activity["kind"] == "refresh_repo_memory_review" else store.get_logs(activity_id)
         summary = _extract_summary(summary_logs)
         activity_result = _extract_activity_result_envelope(summary_logs)
+        result_text = _extract_result_text(summary_logs)
         if activity_result is not None:
             summary = activity_result.summary
             if cost_usd is None:
@@ -554,6 +555,10 @@ async def dispatch(
                 if resolution_state is not None:
                     store.replace_runtime_session_resolution(runtime_session["id"], resolution_state)
                     runtime_session = store.get_runtime_session(runtime_session["id"]) or runtime_session
+        elif runtime_session is not None:
+            linked_pr_number = _extract_pr_number_from_result_text(result_text)
+            if linked_pr_number is not None:
+                store.link_runtime_session_pr(runtime_session["id"], linked_pr_number)
         repo_memory_result_text = _extract_result_text(final_attempt_logs)
         repo_memory_decision = _extract_repo_memory_decision(repo_memory_result_text)
         if refresh_step_started_at is not None and exit_code == 0 and repo_memory_decision is None:
@@ -1360,6 +1365,15 @@ def _extract_pr_number_from_writebacks(runtime_result: ActivityResultEnvelope) -
     return None
 
 
+def _extract_pr_number_from_result_text(result_text: str) -> int | None:
+    if not result_text:
+        return None
+    match = re.search(r"/pull/(\d+)", result_text)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
 def _load_runtime_session_resolution(store: "Store", runtime_session: dict) -> dict | None:
     session_id = runtime_session["id"]
     hypotheses = store.list_runtime_session_hypotheses(session_id)
@@ -1476,17 +1490,9 @@ def _extract_summary(logs: list) -> str:
     if not logs:
         return "No output"
 
-    # Try to find result line in last 10 log entries
-    for log in reversed(logs[-10:]):
-        line = log["line"]
-        try:
-            obj = json.loads(line)
-            if obj.get("type") == "result":
-                result_text = obj.get("result", "")
-                if result_text:
-                    return result_text[:500]
-        except (json.JSONDecodeError, KeyError):
-            continue
+    result_text = _extract_result_text(logs)
+    if result_text:
+        return result_text[:500]
 
     # Fallback: last few lines as plain text
     last_lines = [log["line"] for log in logs[-5:]]
