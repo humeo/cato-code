@@ -9,11 +9,11 @@ from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from ..auth import Auth, get_auth
 from ..auth.base import GitHubAppTokenProvider
-from ..config import get_github_app_webhook_secret, parse_repo_url, repo_id_from_url
+from ..config import get_frontend_url, get_github_app_webhook_secret, parse_repo_url, repo_id_from_url
 from ..decision import decide_engagement
 from ..github.commenter import post_issue_comment
 from ..session_runtime import approval_scope_from_trigger, resolve_runtime_session_for_activity
@@ -56,8 +56,12 @@ class WebhookServer:
             )
 
         # GitHub App-level webhook (all events from all installations)
+        self.app.get("/")(self._root_redirect)
         self.app.post("/webhook/app")(self._handle_app_webhook)
         self.app.get("/webhook/health")(self._health_check)
+
+    async def _root_redirect(self) -> RedirectResponse:
+        return RedirectResponse(url=get_frontend_url(), status_code=307)
 
     async def _health_check(self) -> dict[str, str]:
         """Health check endpoint."""

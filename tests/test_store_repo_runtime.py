@@ -126,6 +126,33 @@ def test_codebase_graph_state_is_independent_from_host_code_index_state(store):
     assert cg_state["symbol_count"] == 91
 
 
+def test_user_visible_repo_cache_replaces_rows_per_installation(store):
+    store.replace_user_visible_repos(
+        "user-1",
+        "111",
+        [
+            {"repo_id": "owner-alpha", "permission": "write"},
+            {"repo_id": "owner-beta", "permission": "admin"},
+        ],
+    )
+    store.replace_user_visible_repos(
+        "user-1",
+        "111",
+        [
+            {"repo_id": "owner-gamma", "permission": "write"},
+        ],
+    )
+
+    rows = store.list_user_visible_repos("user-1")
+    assert [row["repo_id"] for row in rows] == ["owner-gamma"]
+    assert rows[0]["permission"] == "write"
+
+    sync_row = store.get_user_installation_repo_sync("user-1", "111")
+    assert sync_row is not None
+    assert sync_row["repo_count"] == 1
+    assert sync_row["last_error"] is None
+
+
 def test_store_migrates_existing_database_schema(tmp_path):
     db_path = tmp_path / "legacy.db"
     conn = sqlite3.connect(db_path)

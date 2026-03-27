@@ -123,6 +123,24 @@ CREATE TABLE IF NOT EXISTS installations (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS user_visible_repos (
+    user_id TEXT NOT NULL,
+    installation_id TEXT NOT NULL,
+    repo_id TEXT NOT NULL,
+    permission TEXT NOT NULL,
+    synced_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, installation_id, repo_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_installation_repo_sync (
+    user_id TEXT NOT NULL,
+    installation_id TEXT NOT NULL,
+    synced_at TEXT NOT NULL,
+    repo_count INTEGER DEFAULT 0,
+    last_error TEXT,
+    PRIMARY KEY (user_id, installation_id)
+);
+
 CREATE TABLE IF NOT EXISTS install_states (
     state TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -266,6 +284,7 @@ CREATE INDEX IF NOT EXISTS idx_code_defs_repo_file ON code_definitions(repo_id, 
 CREATE INDEX IF NOT EXISTS idx_runtime_sessions_repo_status ON runtime_sessions(repo_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_runtime_session_issue_repo_issue ON runtime_session_issue_links(repo_id, issue_number, created_at);
 CREATE INDEX IF NOT EXISTS idx_runtime_session_pr_repo_pr ON runtime_session_pr_links(repo_id, pr_number, created_at);
+CREATE INDEX IF NOT EXISTS idx_user_visible_repos_user_repo ON user_visible_repos(user_id, repo_id);
 """
 
 # Migrations: columns added after initial schema
@@ -286,6 +305,23 @@ _MIGRATIONS = [
     "ALTER TABLE activities ADD COLUMN cost_usd REAL",
     "ALTER TABLE repos ADD COLUMN user_id TEXT",
     "ALTER TABLE installations ADD COLUMN user_id TEXT",
+    """CREATE TABLE IF NOT EXISTS user_visible_repos (
+    user_id TEXT NOT NULL,
+    installation_id TEXT NOT NULL,
+    repo_id TEXT NOT NULL,
+    permission TEXT NOT NULL,
+    synced_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, installation_id, repo_id)
+)""",
+    """CREATE TABLE IF NOT EXISTS user_installation_repo_sync (
+    user_id TEXT NOT NULL,
+    installation_id TEXT NOT NULL,
+    synced_at TEXT NOT NULL,
+    repo_count INTEGER DEFAULT 0,
+    last_error TEXT,
+    PRIMARY KEY (user_id, installation_id)
+)""",
+    "CREATE INDEX IF NOT EXISTS idx_user_visible_repos_user_repo ON user_visible_repos(user_id, repo_id)",
     "ALTER TABLE repos ADD COLUMN patrol_enabled INTEGER DEFAULT 0",
     "ALTER TABLE repos ADD COLUMN patrol_max_issues INTEGER DEFAULT 5",
     "ALTER TABLE repos ADD COLUMN patrol_window_hours INTEGER DEFAULT 12",
@@ -1366,6 +1402,66 @@ class Store:
             "SELECT user_id FROM installations WHERE installation_id = ?", (installation_id,)
         )
         return row["user_id"] if row else None
+
+    def replace_user_visible_repos(
+        self,
+        user_id: str,
+        installation_id: str,
+        repos: list[dict[str, str]],
+    ) -> None:
+        synced_at = _now()
+        self._db.execute(
+            "DELETE FROM user_visible_repos WHERE user_id = ? AND installation_id = ?",
+            (user_id, installation_id),
+        )
+        for repo in repos:
+            self._db.execute(
+                """INSERT INTO user_visible_repos
+                   (user_id, installation_id, repo_id, permission, synced_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (user_id, installation_id, repo["repo_id"], repo["permission"], synced_at),
+            )
+        self._db.execute(
+            """INSERT OR REPLACE INTO user_installation_repo_sync
+               (user_id, installation_id, synced_at, repo_count, last_error)
+               VALUES (?, ?, ?, ?, NULL)""",
+            (user_id, installation_id, synced_at, len(repos)),
+        )
+        self._db.commit()
+
+    def mark_user_visible_repo_sync_failed(self, user_id: str, installation_id: str, error: str) -> None:
+        self._db.execute(
+            """INSERT INTO user_installation_repo_sync
+               (user_id, installation_id, synced_at, repo_count, last_error)
+               VALUES (?, ?, ?, 0, ?)
+               ON CONFLICT(user_id, installation_id) DO UPDATE SET
+                   synced_at = excluded.synced_at,
+                   last_error = excluded.last_error""",
+            (user_id, installation_id, _now(), error),
+        )
+        self._db.commit()
+
+    def get_user_installation_repo_sync(self, user_id: str, installation_id: str) -> dict | None:
+        return self._db.execute_one(
+            """SELECT * FROM user_installation_repo_sync
+               WHERE user_id = ? AND installation_id = ?""",
+            (user_id, installation_id),
+        )
+
+    def get_user_visible_repo(self, user_id: str, repo_id: str) -> dict | None:
+        return self._db.execute_one(
+            """SELECT * FROM user_visible_repos
+               WHERE user_id = ? AND repo_id = ?""",
+            (user_id, repo_id),
+        )
+
+    def list_user_visible_repos(self, user_id: str) -> list[dict]:
+        return self._db.execute(
+            """SELECT * FROM user_visible_repos
+               WHERE user_id = ?
+               ORDER BY repo_id""",
+            (user_id,),
+        )
 
     # --- users ---
 

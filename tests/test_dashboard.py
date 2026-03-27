@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,10 +38,11 @@ def _make_client(tmp_path: Path) -> tuple[TestClient, Store]:
     return client, store
 
 
-def test_root_path_not_exposed(tmp_path):
+def test_root_path_redirects_to_frontend(tmp_path):
     client, _ = _make_client(tmp_path)
-    resp = client.get("/")
-    assert resp.status_code == 404
+    resp = client.get("/", follow_redirects=False)
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "http://localhost:3000"
 
 
 def test_api_requires_authentication(tmp_path):
@@ -359,3 +360,76 @@ def test_api_repos_hides_repo_without_installation_or_write_access(tmp_path):
     assert resp.status_code == 200
     repos = resp.json()
     assert [repo["id"] for repo in repos] == ["installed-visible"]
+
+
+def test_api_repos_syncs_visible_repos_once_per_installation_and_reuses_cache(tmp_path):
+    client, store = _make_client(tmp_path)
+    store.add_repo("owner-alpha", "https://github.com/owner/alpha")
+    store.update_repo("owner-alpha", installation_id="111")
+    store.add_repo("owner-beta", "https://github.com/owner/beta")
+    store.update_repo("owner-beta", installation_id="111")
+    store.add_repo("owner-gamma", "https://github.com/owner/gamma")
+    store.update_repo("owner-gamma", installation_id="222")
+
+    async def _list_visible(installation_id: str, github_token: str):
+        assert github_token == "ghu_user_token"
+        if installation_id == "111":
+            return [
+                {
+                    "full_name": "owner/alpha",
+                    "permissions": {"admin": False, "push": True, "pull": True},
+                },
+                {
+                    "full_name": "owner/beta",
+                    "permissions": {"admin": False, "push": False, "pull": True},
+                },
+            ]
+        if installation_id == "222":
+            return [
+                {
+                    "full_name": "owner/gamma",
+                    "permissions": {"admin": True, "push": True, "pull": True},
+                }
+            ]
+        return []
+
+    with (
+        patch(
+            "catocode.api.routes.list_user_installation_repositories",
+            new=AsyncMock(side_effect=_list_visible),
+            create=True,
+        ) as sync_mock,
+        patch("catocode.api.routes.check_repo_write_access", new=AsyncMock(side_effect=AssertionError("should not live-check repos"))),
+    ):
+        first = client.get("/api/repos")
+        second = client.get("/api/repos")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert [repo["id"] for repo in first.json()] == ["owner-alpha", "owner-gamma"]
+    assert [repo["id"] for repo in second.json()] == ["owner-alpha", "owner-gamma"]
+    assert sync_mock.await_count == 2
+
+
+def test_api_repos_falls_back_to_live_check_when_installation_sync_fails(tmp_path):
+    client, store = _make_client(tmp_path)
+    store.add_repo("owner-alpha", "https://github.com/owner/alpha")
+    store.update_repo("owner-alpha", installation_id="111")
+
+    with (
+        patch(
+            "catocode.api.routes.list_user_installation_repositories",
+            new=AsyncMock(side_effect=RuntimeError("GitHub unavailable")),
+            create=True,
+        ) as sync_mock,
+        patch("catocode.api.routes.check_repo_write_access", new=AsyncMock(return_value=(True, "write"))) as live_check_mock,
+    ):
+        first = client.get("/api/repos")
+        second = client.get("/api/repos")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert [repo["id"] for repo in first.json()] == ["owner-alpha"]
+    assert [repo["id"] for repo in second.json()] == ["owner-alpha"]
+    assert sync_mock.await_count == 2
+    assert live_check_mock.await_count == 2

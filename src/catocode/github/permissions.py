@@ -121,3 +121,36 @@ async def check_repo_write_access(
         f"@{username} only has '{permission}' access to {owner}/{repo} "
         f"(write or admin required)",
     )
+
+
+async def list_user_installation_repositories(
+    installation_id: str,
+    github_token: str,
+) -> list[dict]:
+    """List repositories visible to a GitHub App user token for one installation."""
+    repositories: list[dict] = []
+    page = 1
+
+    async with httpx.AsyncClient() as client:
+        while True:
+            response = await client.get(
+                f"{GITHUB_API}/user/installations/{installation_id}/repositories",
+                headers=_headers(github_token),
+                params={"per_page": 100, "page": page},
+                timeout=15.0,
+            )
+            if response.status_code in {403, 404}:
+                logger.info(
+                    "User token cannot list repos for installation %s (HTTP %s)",
+                    installation_id,
+                    response.status_code,
+                )
+                return []
+            response.raise_for_status()
+
+            payload = response.json()
+            page_items = payload.get("repositories", [])
+            repositories.extend(page_items)
+            if len(page_items) < 100:
+                return repositories
+            page += 1

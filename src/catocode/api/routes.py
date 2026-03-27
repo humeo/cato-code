@@ -6,13 +6,14 @@ import asyncio
 import json
 import logging
 import secrets
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from ..config import get_github_app_name, get_patrol_config, parse_repo_url
-from ..github.permissions import check_repo_write_access
+from ..github.permissions import check_repo_write_access, list_user_installation_repositories
 from ..store import Store
 from .crypto import decrypt_token
 from .deps import CurrentUser
@@ -20,6 +21,8 @@ from .deps import CurrentUser
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["api"])
+VISIBLE_REPO_CACHE_TTL = timedelta(minutes=5)
+WRITE_PERMISSIONS = {"write", "admin"}
 
 
 class PatrolSettings(BaseModel):
@@ -122,7 +125,84 @@ def _get_user_github_token(current_user: dict) -> str:
         raise HTTPException(status_code=401, detail="GitHub login expired") from exc
 
 
-async def _can_manage_repo(repo: dict, current_user: dict) -> bool:
+def _repo_permission_from_payload(payload: dict) -> str:
+    permissions = payload.get("permissions") or {}
+    if permissions.get("admin"):
+        return "admin"
+    if permissions.get("push"):
+        return "write"
+    if permissions.get("pull"):
+        return "read"
+    return "none"
+
+
+def _is_sync_fresh(sync_row: dict | None) -> bool:
+    if sync_row is None:
+        return False
+    if sync_row.get("last_error"):
+        return False
+    synced_at_raw = sync_row.get("synced_at")
+    if not synced_at_raw:
+        return False
+    try:
+        synced_at = datetime.fromisoformat(synced_at_raw)
+    except ValueError:
+        return False
+    return synced_at >= datetime.now(timezone.utc) - VISIBLE_REPO_CACHE_TTL
+
+
+async def _sync_visible_repos_for_installation(
+    store: Store,
+    current_user: dict,
+    installation_id: str,
+    github_token: str,
+) -> bool:
+    try:
+        visible_repos = await list_user_installation_repositories(installation_id, github_token)
+    except Exception as exc:
+        logger.warning(
+            "Failed to sync visible repos for user %s installation %s: %s",
+            current_user.get("id"),
+            installation_id,
+            exc,
+        )
+        store.mark_user_visible_repo_sync_failed(current_user["id"], installation_id, str(exc))
+        return False
+
+    cached_rows: list[dict[str, str]] = []
+    for repo_payload in visible_repos:
+        permission = _repo_permission_from_payload(repo_payload)
+        if permission not in WRITE_PERMISSIONS:
+            continue
+        full_name = repo_payload.get("full_name")
+        if not full_name or "/" not in full_name:
+            continue
+        cached_rows.append(
+            {
+                "repo_id": full_name.replace("/", "-"),
+                "permission": permission,
+            }
+        )
+
+    store.replace_user_visible_repos(current_user["id"], installation_id, cached_rows)
+    return True
+
+
+async def _ensure_visible_repo_cache(
+    store: Store,
+    current_user: dict,
+    installation_id: str | None,
+    github_token: str,
+) -> bool:
+    if not installation_id:
+        return False
+    sync_row = store.get_user_installation_repo_sync(current_user["id"], installation_id)
+    if _is_sync_fresh(sync_row):
+        return True
+    return await _sync_visible_repos_for_installation(store, current_user, installation_id, github_token)
+
+
+async def _can_manage_repo_live(repo: dict, github_token: str) -> bool:
     if not repo.get("installation_id"):
         return False
     try:
@@ -130,16 +210,42 @@ async def _can_manage_repo(repo: dict, current_user: dict) -> bool:
     except Exception:
         logger.warning("Skipping repo with invalid URL in dashboard: %s", repo.get("id"))
         return False
-    github_token = _get_user_github_token(current_user)
     has_access, _reason = await check_repo_write_access(owner, repo_name, github_token)
     return has_access
 
 
 async def _list_visible_repos(store: Store, current_user: dict) -> list[dict]:
+    repos = [dict(repo) for repo in store.list_repos() if repo.get("installation_id")]
+    if not repos:
+        return []
+
+    github_token = _get_user_github_token(current_user)
+    installation_ids = sorted({repo["installation_id"] for repo in repos if repo.get("installation_id")})
+    sync_results = await asyncio.gather(
+        *[
+            _ensure_visible_repo_cache(store, current_user, installation_id, github_token)
+            for installation_id in installation_ids
+        ]
+    )
+    authoritative_installations = {
+        installation_id
+        for installation_id, synced in zip(installation_ids, sync_results, strict=True)
+        if synced
+    }
+    visible_permissions = {
+        row["repo_id"]: row["permission"]
+        for row in store.list_user_visible_repos(current_user["id"])
+    }
+
     visible: list[dict] = []
-    for repo in store.list_repos():
-        if await _can_manage_repo(repo, current_user):
-            visible.append(dict(repo))
+    for repo in repos:
+        installation_id = repo.get("installation_id")
+        if installation_id in authoritative_installations:
+            if visible_permissions.get(repo["id"]) in WRITE_PERMISSIONS:
+                visible.append(repo)
+            continue
+        if await _can_manage_repo_live(repo, github_token):
+            visible.append(repo)
     return visible
 
 
@@ -147,7 +253,19 @@ async def _require_visible_repo(store: Store, repo_id: str, current_user: dict) 
     repo = store.get_repo(repo_id)
     if repo is None:
         raise HTTPException(status_code=404, detail="Repo not found")
-    if not await _can_manage_repo(repo, current_user):
+    github_token = _get_user_github_token(current_user)
+    authoritative = await _ensure_visible_repo_cache(
+        store,
+        current_user,
+        repo.get("installation_id"),
+        github_token,
+    )
+    if authoritative:
+        cached = store.get_user_visible_repo(current_user["id"], repo_id)
+        if cached and cached.get("permission") in WRITE_PERMISSIONS:
+            return repo
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not await _can_manage_repo_live(repo, github_token):
         raise HTTPException(status_code=403, detail="Access denied")
     return repo
 
