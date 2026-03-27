@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["api"])
 VISIBLE_REPO_CACHE_TTL = timedelta(minutes=5)
 WRITE_PERMISSIONS = {"write", "admin"}
+DISABLED_ACTIVITY_KINDS = {"patrol"}
 
 
 def _enrich_activity(activity: dict) -> dict:
@@ -33,6 +34,10 @@ def _enrich_activity(activity: dict) -> dict:
     else:
         a["pipeline_stage"] = status
     return a
+
+
+def _is_visible_activity(activity: dict) -> bool:
+    return activity.get("kind") not in DISABLED_ACTIVITY_KINDS
 
 
 def _serialize_activity(activity: dict, store: Store, *, include_detail: bool = False) -> dict:
@@ -262,7 +267,11 @@ async def _require_visible_repo(store: Store, repo_id: str, current_user: dict) 
 
 def _build_stats_payload(store: Store, visible_repos: list[dict]) -> dict:
     repo_ids = {repo["id"] for repo in visible_repos}
-    activities = [activity for activity in store.list_activities() if activity["repo_id"] in repo_ids]
+    activities = [
+        activity
+        for activity in store.list_activities()
+        if activity["repo_id"] in repo_ids and _is_visible_activity(activity)
+    ]
     by_status: dict[str, int] = {}
     by_kind: dict[str, int] = {}
     total_cost = 0.0
@@ -362,12 +371,16 @@ def make_router(store: Store) -> APIRouter:
     @r.get("/repos/{repo_id}/activities")
     async def list_repo_activities(repo_id: str, current_user: CurrentUser) -> list[dict]:
         await _require_visible_repo(store, repo_id, current_user)
-        return [_serialize_activity(a, store) for a in store.list_activities(repo_id=repo_id)]
+        return [_serialize_activity(a, store) for a in store.list_activities(repo_id=repo_id) if _is_visible_activity(a)]
 
     @r.get("/activities")
     async def list_activities(current_user: CurrentUser) -> list[dict]:
         repo_ids = {repo["id"] for repo in await _list_visible_repos(store, current_user)}
-        activities = [activity for activity in store.list_activities() if activity["repo_id"] in repo_ids]
+        activities = [
+            activity
+            for activity in store.list_activities()
+            if activity["repo_id"] in repo_ids and _is_visible_activity(activity)
+        ]
         return [_serialize_activity(a, store) for a in activities]
 
     @r.get("/activities/{activity_id}")
