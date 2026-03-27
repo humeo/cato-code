@@ -52,6 +52,8 @@ export function ActivityTable({ activities, hideRepo = false }: ActivityTablePro
               <tr
                 key={a.id}
                 onClick={() => router.push(`/dashboard/activity/${a.id}`)}
+                onMouseEnter={() => router.prefetch(`/dashboard/activity/${a.id}`)}
+                onFocus={() => router.prefetch(`/dashboard/activity/${a.id}`)}
                 className="text-gray-400 border-b border-border-subtle/50 hover:bg-white/[0.03] transition-colors cursor-pointer"
               >
                 {!hideRepo && (

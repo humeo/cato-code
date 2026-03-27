@@ -1,19 +1,25 @@
 import { describe, expect, it, mock } from "bun:test";
 import type { ReactNode } from "react";
+import type { DashboardPayload } from "@/lib/types";
 
-const statsPayload = {
+const dashboardPayload: DashboardPayload = {
   repos: { total: 1, watched: 1 },
   activities: { by_status: { done: 1 }, by_kind: { setup: 1 }, total: 1 },
   cost_usd: 0.12,
   recent_activities: [],
+  stats: {
+    repos: { total: 1, watched: 1 },
+    activities: { by_status: { done: 1 }, by_kind: { setup: 1 }, total: 1 },
+    cost_usd: 0.12,
+    recent_activities: [],
+  },
+  activities: [{ id: "activity-1" }] as DashboardPayload["activities"],
+  repos: [{ id: "repo-1" }] as DashboardPayload["repos"],
 };
 
-const activitiesPayload = [{ id: "activity-1" }];
-const reposPayload = [{ id: "repo-1" }];
-
-const getStats = mock(async (_init?: RequestInit) => statsPayload);
-const getActivities = mock(async (_init?: RequestInit) => activitiesPayload);
-const getRepos = mock(async (_init?: RequestInit) => reposPayload);
+const getDashboard = mock(async (_init?: RequestInit) => dashboardPayload);
+const getActivity = mock(async () => null);
+const getActivityLogs = mock(async () => []);
 const cookies = mock(async () => ({ toString: () => "session=session-1" }));
 
 mock.module("next/headers", () => ({
@@ -21,9 +27,9 @@ mock.module("next/headers", () => ({
 }));
 
 mock.module("@/lib/api", () => ({
-  getStats,
-  getActivities,
-  getRepos,
+  getDashboard,
+  getActivity,
+  getActivityLogs,
 }));
 
 mock.module("@/components/LiveDashboard", () => ({
@@ -40,11 +46,9 @@ describe("DashboardPage", () => {
     const liveDashboard = page.props.children;
 
     expect(cookies).toHaveBeenCalled();
-    expect(getStats).toHaveBeenCalledWith({ headers: { cookie: "session=session-1" } });
-    expect(getActivities).toHaveBeenCalledWith({ headers: { cookie: "session=session-1" } });
-    expect(getRepos).toHaveBeenCalledWith({ headers: { cookie: "session=session-1" } });
-    expect(liveDashboard.props.initialStats).toEqual(statsPayload);
-    expect(liveDashboard.props.initialActivities).toEqual(activitiesPayload);
-    expect(liveDashboard.props.initialRepos).toEqual(reposPayload);
+    expect(getDashboard).toHaveBeenCalledWith({ headers: { cookie: "session=session-1" } });
+    expect(liveDashboard.props.initialStats).toEqual(dashboardPayload.stats);
+    expect(liveDashboard.props.initialActivities).toEqual(dashboardPayload.activities);
+    expect(liveDashboard.props.initialRepos).toEqual(dashboardPayload.repos);
   });
 });

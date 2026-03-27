@@ -5,17 +5,22 @@ import type { Activity, ActivityLog, ActivityStep } from "@/lib/types";
 import { getActivity, getActivityLogs, getLogStreamUrl } from "@/lib/api";
 import { PipelineStages } from "@/components/PipelineStages";
 import { LogLine } from "@/components/LogLine";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import { shouldUseHistoryBack } from "@/lib/navigation";
 
 interface ActivityDetailProps {
   activityId: string;
+  initialActivity?: Activity | null;
+  initialLogs?: ActivityLog[];
 }
 
-export function ActivityDetail({ activityId }: ActivityDetailProps) {
-  const [activity, setActivity] = useState<Activity | null>(null);
-  const [logs, setLogs] = useState<ActivityLog[]>([]);
+export function ActivityDetail({ activityId, initialActivity = null, initialLogs = [] }: ActivityDetailProps) {
+  const router = useRouter();
+  const [activity, setActivity] = useState<Activity | null>(initialActivity);
+  const [logs, setLogs] = useState<ActivityLog[]>(initialLogs);
   const [streaming, setStreaming] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(initialActivity === null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const autoScroll = useRef(true);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -36,6 +41,10 @@ export function ActivityDetail({ activityId }: ActivityDetailProps) {
 
   // Fetch initial data
   useEffect(() => {
+    if (initialActivity) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     async function load() {
       const [a, l] = await Promise.all([
@@ -49,7 +58,11 @@ export function ActivityDetail({ activityId }: ActivityDetailProps) {
     }
     load();
     return () => { cancelled = true; };
-  }, [activityId]);
+  }, [activityId, initialActivity]);
+
+  useEffect(() => {
+    router.prefetch("/dashboard");
+  }, [router]);
 
   // SSE streaming for running activities
   useEffect(() => {
@@ -137,6 +150,21 @@ export function ActivityDetail({ activityId }: ActivityDetailProps) {
     return `${(durationMs / 1000).toFixed(1)}s`;
   };
 
+  const handleBack = useCallback(() => {
+    const origin = window.location.origin;
+    if (
+      shouldUseHistoryBack({
+        historyLength: window.history.length,
+        referrer: document.referrer,
+        origin,
+      })
+    ) {
+      router.back();
+      return;
+    }
+    router.push("/dashboard");
+  }, [router]);
+
   const stepStatusClass = (step: ActivityStep) => {
     if (step.status === "done") return "text-emerald-300 bg-emerald-400/10";
     if (step.status === "failed") return "text-red-300 bg-red-400/10";
@@ -147,15 +175,16 @@ export function ActivityDetail({ activityId }: ActivityDetailProps) {
   return (
     <div className="space-y-4">
       {/* Back link */}
-      <Link
-        href="/dashboard"
+      <button
+        type="button"
+        onClick={handleBack}
         className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors"
       >
         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
         Dashboard
-      </Link>
+      </button>
 
       {/* Pipeline stage */}
       <div className="glass rounded-xl p-4">

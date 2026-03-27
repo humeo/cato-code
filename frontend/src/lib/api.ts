@@ -92,12 +92,12 @@ export async function retrySetup(
   }
 }
 
-export async function getActivity(activityId: string): Promise<Activity | null> {
-  return apiFetch<Activity>(`/api/activities/${activityId}`);
+export async function getActivity(activityId: string, init?: RequestInit): Promise<Activity | null> {
+  return apiFetch<Activity>(`/api/activities/${activityId}`, init);
 }
 
-export async function getActivityLogs(activityId: string): Promise<ActivityLog[] | null> {
-  return apiFetch<ActivityLog[]>(`/api/activities/${activityId}/logs`);
+export async function getActivityLogs(activityId: string, init?: RequestInit): Promise<ActivityLog[] | null> {
+  return apiFetch<ActivityLog[]>(`/api/activities/${activityId}/logs`, init);
 }
 
 export function getLogStreamUrl(activityId: string): string {

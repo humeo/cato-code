@@ -7,6 +7,7 @@ import json
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 
 from fastapi import APIRouter, HTTPException
 from sse_starlette.sse import EventSourceResponse
@@ -23,6 +24,9 @@ router = APIRouter(tags=["api"])
 VISIBLE_REPO_CACHE_TTL = timedelta(minutes=5)
 WRITE_PERMISSIONS = {"write", "admin"}
 DISABLED_ACTIVITY_KINDS = {"patrol"}
+SLOW_VISIBLE_REPOS_MS = 300.0
+SLOW_DASHBOARD_MS = 400.0
+SLOW_ACTIVITY_DETAIL_MS = 250.0
 
 
 def _enrich_activity(activity: dict) -> dict:
@@ -38,6 +42,14 @@ def _enrich_activity(activity: dict) -> dict:
 
 def _is_visible_activity(activity: dict) -> bool:
     return activity.get("kind") not in DISABLED_ACTIVITY_KINDS
+
+
+def _log_slow_api(route_name: str, started_at: float, threshold_ms: float, **context: object) -> float:
+    duration_ms = (perf_counter() - started_at) * 1000
+    if duration_ms >= threshold_ms:
+        context_str = " ".join(f"{key}={value}" for key, value in sorted(context.items()))
+        logger.warning("Slow API path=%s duration_ms=%.1f %s", route_name, duration_ms, context_str)
+    return duration_ms
 
 
 def _serialize_activity(activity: dict, store: Store, *, include_detail: bool = False) -> dict:
@@ -210,6 +222,7 @@ async def _can_manage_repo_live(repo: dict, github_token: str) -> bool:
 
 
 async def _list_visible_repos(store: Store, current_user: dict) -> list[dict]:
+    started_at = perf_counter()
     repos = [dict(repo) for repo in store.list_repos() if repo.get("installation_id")]
     if not repos:
         return []
@@ -241,6 +254,15 @@ async def _list_visible_repos(store: Store, current_user: dict) -> list[dict]:
             continue
         if await _can_manage_repo_live(repo, github_token):
             visible.append(repo)
+    _log_slow_api(
+        "_list_visible_repos",
+        started_at,
+        SLOW_VISIBLE_REPOS_MS,
+        user=current_user.get("id", "")[:8],
+        repos=len(repos),
+        visible=len(visible),
+        authoritative=len(authoritative_installations),
+    )
     return visible
 
 
@@ -335,8 +357,18 @@ def make_router(store: Store) -> APIRouter:
 
     @r.get("/dashboard")
     async def get_dashboard(current_user: CurrentUser) -> dict:
+        started_at = perf_counter()
         repos = await _list_visible_repos(store, current_user)
-        return _build_dashboard_payload(store, repos)
+        payload = _build_dashboard_payload(store, repos)
+        _log_slow_api(
+            "/api/dashboard",
+            started_at,
+            SLOW_DASHBOARD_MS,
+            user=current_user.get("id", "")[:8],
+            repos=len(repos),
+            activities=len(payload["activities"]),
+        )
+        return payload
 
     @r.get("/repos")
     async def list_repos(current_user: CurrentUser) -> list[dict]:
@@ -405,19 +437,41 @@ def make_router(store: Store) -> APIRouter:
 
     @r.get("/activities/{activity_id}")
     async def get_activity(activity_id: str, current_user: CurrentUser) -> dict:
+        started_at = perf_counter()
         activity = store.get_activity(activity_id)
         if activity is None:
             raise HTTPException(status_code=404, detail="Activity not found")
         await _require_visible_repo(store, activity["repo_id"], current_user)
-        return _serialize_activity(activity, store, include_detail=True)
+        payload = _serialize_activity(activity, store, include_detail=True)
+        _log_slow_api(
+            "/api/activities/{activity_id}",
+            started_at,
+            SLOW_ACTIVITY_DETAIL_MS,
+            user=current_user.get("id", "")[:8],
+            activity=activity_id[:8],
+            repo=activity["repo_id"],
+            logs=len(store.get_logs(activity_id)),
+        )
+        return payload
 
     @r.get("/activities/{activity_id}/logs")
     async def get_activity_logs(activity_id: str, current_user: CurrentUser) -> list[dict]:
+        started_at = perf_counter()
         activity = store.get_activity(activity_id)
         if activity is None:
             raise HTTPException(status_code=404, detail="Activity not found")
         await _require_visible_repo(store, activity["repo_id"], current_user)
-        return [dict(log) for log in store.get_logs(activity_id)]
+        payload = [dict(log) for log in store.get_logs(activity_id)]
+        _log_slow_api(
+            "/api/activities/{activity_id}/logs",
+            started_at,
+            SLOW_ACTIVITY_DETAIL_MS,
+            user=current_user.get("id", "")[:8],
+            activity=activity_id[:8],
+            repo=activity["repo_id"],
+            logs=len(payload),
+        )
+        return payload
 
     @r.get("/activities/{activity_id}/logs/stream")
     async def stream_activity_logs(activity_id: str, current_user: CurrentUser):
