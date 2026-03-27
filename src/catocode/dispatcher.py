@@ -547,6 +547,9 @@ async def dispatch(
             store.update_activity(activity_id, metadata=merged_metadata)
             _record_runtime_result_steps(store, activity_id, activity_result)
             if runtime_session is not None:
+                linked_pr_number = _extract_pr_number_from_writebacks(activity_result)
+                if linked_pr_number is not None:
+                    store.link_runtime_session_pr(runtime_session["id"], linked_pr_number)
                 resolution_state = _normalize_resolution_state(activity_result)
                 if resolution_state is not None:
                     store.replace_runtime_session_resolution(runtime_session["id"], resolution_state)
@@ -1327,6 +1330,23 @@ def _normalize_resolution_state(runtime_result: ActivityResultEnvelope) -> dict 
     }
     if any(normalized.values()):
         return normalized
+    return None
+
+
+def _extract_pr_number_from_writebacks(runtime_result: ActivityResultEnvelope) -> int | None:
+    for writeback in runtime_result.writebacks:
+        if not isinstance(writeback, dict):
+            continue
+        pr_number = writeback.get("pr_number")
+        if isinstance(pr_number, int):
+            return pr_number
+        if isinstance(pr_number, str) and pr_number.isdigit():
+            return int(pr_number)
+        url = writeback.get("url")
+        if isinstance(url, str):
+            match = re.search(r"/pull/(\d+)", url)
+            if match:
+                return int(match.group(1))
     return None
 
 

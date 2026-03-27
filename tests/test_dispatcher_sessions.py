@@ -188,7 +188,15 @@ async def test_dispatch_fix_issue_uses_runtime_session_worktree_and_persists_sdk
             status="done",
             summary="Fixed issue 42 and verified the regression.",
             session={"sdk_session_id": "sdk-new", "continued": True},
-            writebacks=[{"kind": "pr_opened", "target": "pr", "status": "done", "url": "https://github.com/owner/repo/pull/42"}],
+            writebacks=[
+                {
+                    "kind": "pull_request",
+                    "target": "pr",
+                    "status": "done",
+                    "pr_number": 101,
+                    "url": "https://github.com/owner/repo/pull/101",
+                }
+            ],
             artifacts={
                 "decision": {"kind": "fix_issue"},
                 "verification": {"status": "passed", "summary": "pytest tests/test_token.py::test_empty_input"},
@@ -241,6 +249,9 @@ async def test_dispatch_fix_issue_uses_runtime_session_worktree_and_persists_sdk
     assert store.list_runtime_session_checkpoints(runtime_session_id) == [
         {"id": "c2", "label": "verified-fix", "status": "done", "commit_sha": "abc123"}
     ]
+    linked_pr_session = store.find_pr_runtime_session("owner-repo", 101)
+    assert linked_pr_session is not None
+    assert linked_pr_session["id"] == runtime_session_id
 
     assert container_mgr.ensure_session_worktree_calls == [
         ("owner-repo", "https://github.com/owner/repo", runtime_session_id)
@@ -249,6 +260,61 @@ async def test_dispatch_fix_issue_uses_runtime_session_worktree_and_persists_sdk
         ("/repos/.worktrees/owner-repo/runtime-session-1", None)
     ]
     assert cg_workdirs == ["/repos/.worktrees/owner-repo/runtime-session-1"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_respond_review_reuses_linked_pr_runtime_session(monkeypatch, tmp_path):
+    from catocode.dispatcher import dispatch
+
+    store = Store(db_path=tmp_path / "test.db")
+    _seed_ready_repo(store)
+    runtime_session_id = store.create_runtime_session(
+        repo_id="owner-repo",
+        entry_kind="fix_issue",
+        status="active",
+        worktree_path="/repos/.worktrees/owner-repo/runtime-session-2",
+        branch_name="catocode/session/runtime-session-2",
+        issue_number=42,
+        sdk_session_id="sdk-existing",
+    )
+    store.link_runtime_session_pr(runtime_session_id, pr_number=29)
+    activity_id = store.add_activity("owner-repo", "respond_review", "pr:29")
+    container_mgr = SessionAwareContainerManager("/repos/.worktrees/owner-repo/runtime-session-2")
+
+    monkeypatch.setattr("catocode.dispatcher._build_prompt", AsyncMock(return_value="respond prompt"))
+    monkeypatch.setattr("catocode.dispatcher._index_repo_from_container", lambda *args, **kwargs: None)
+    monkeypatch.setattr("catocode.dispatcher.prepare_codebase_graph_runtime", lambda *args, **kwargs: None)
+
+    async def fake_execute_sdk_runner(**kwargs):
+        assert kwargs["cwd"] == "/repos/.worktrees/owner-repo/runtime-session-2"
+        assert kwargs["session_id"] == "sdk-existing"
+        store.add_log(
+            kwargs["activity_id"],
+            json.dumps({"type": "result", "result": "Handled review feedback", "session_id": "sdk-existing"}),
+        )
+        return 0, "sdk-existing", 0.1
+
+    monkeypatch.setattr("catocode.dispatcher._execute_sdk_runner", fake_execute_sdk_runner)
+
+    await dispatch(
+        activity_id=activity_id,
+        store=store,
+        container_mgr=container_mgr,
+        anthropic_api_key="sk-ant",
+        github_token="ghp-token",
+        verbose=False,
+    )
+
+    activity = store.get_activity(activity_id)
+    assert activity is not None
+    assert activity["status"] == "done"
+    assert activity["session_id"] == runtime_session_id
+    assert container_mgr.ensure_session_worktree_calls == [
+        ("owner-repo", "https://github.com/owner/repo", runtime_session_id)
+    ]
+    assert container_mgr.reset_checkout_calls == [
+        ("/repos/.worktrees/owner-repo/runtime-session-2", None)
+    ]
 
 
 @pytest.mark.asyncio
