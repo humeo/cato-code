@@ -67,6 +67,29 @@ def _duration_ms(started_at: str, finished_at: str) -> int | None:
     return max(0, int((finished - started).total_seconds() * 1000))
 
 
+def _activity_metadata_dict(activity: dict) -> dict:
+    raw_metadata = activity.get("metadata")
+    if isinstance(raw_metadata, dict):
+        return raw_metadata
+    if not raw_metadata:
+        return {}
+    try:
+        parsed = json.loads(raw_metadata)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _runtime_session_reset_target_ref(activity: dict, recovery_checkpoint: dict | None) -> str | None:
+    if recovery_checkpoint and recovery_checkpoint.get("commit_sha"):
+        return str(recovery_checkpoint["commit_sha"])
+    if activity.get("kind") == "refresh_repo_memory_review":
+        merge_commit_sha = _activity_metadata_dict(activity).get("merge_commit_sha")
+        if merge_commit_sha:
+            return str(merge_commit_sha)
+    return None
+
+
 def _start_activity_step(
     store: "Store",
     activity_id: str,
@@ -418,10 +441,7 @@ async def dispatch(
                 activity = store.get_activity(activity_id) or activity
             runtime_session = store.get_runtime_session(runtime_session["id"]) or runtime_session
             if supports_reset_checkout:
-                container_mgr.reset_checkout(
-                    activity_workdir,
-                    target_ref=(recovery_checkpoint or {}).get("commit_sha"),
-                )
+                container_mgr.reset_checkout(activity_workdir, target_ref=_runtime_session_reset_target_ref(activity, recovery_checkpoint))
             elif activity["kind"] != "respond_review":
                 _call_container_method(container_mgr.reset_repo, repo_id, github_token=github_token)
         elif activity["kind"] != "respond_review":
@@ -501,7 +521,10 @@ async def dispatch(
                 # Reset repo to clean state before retry
                 if runtime_session is not None:
                     if supports_reset_checkout:
-                        container_mgr.reset_checkout(activity_workdir)
+                        container_mgr.reset_checkout(
+                            activity_workdir,
+                            target_ref=_runtime_session_reset_target_ref(activity, recovery_checkpoint),
+                        )
                     elif activity["kind"] != "respond_review":
                         container_mgr.reset_repo(repo_id)
                 elif activity["kind"] != "respond_review":

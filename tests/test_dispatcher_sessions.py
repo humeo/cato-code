@@ -404,6 +404,54 @@ async def test_dispatch_fix_issue_restores_latest_checkpoint_before_recovery_run
 
 
 @pytest.mark.asyncio
+async def test_dispatch_refresh_repo_memory_review_resets_worktree_to_merge_commit(monkeypatch, tmp_path):
+    from catocode.dispatcher import dispatch
+
+    store = Store(db_path=tmp_path / "test.db")
+    _seed_ready_repo(store)
+    activity_id = store.add_activity(
+        "owner-repo",
+        "refresh_repo_memory_review",
+        "repo_memory_refresh:pr:42",
+        metadata={"pr_number": 42, "merge_commit_sha": "merge123", "title": "Update memory after merge"},
+    )
+    container_mgr = SessionAwareContainerManager("/repos/.worktrees/owner-repo/runtime-refresh-session")
+
+    monkeypatch.setattr("catocode.dispatcher._build_prompt", AsyncMock(return_value="refresh prompt"))
+    monkeypatch.setattr("catocode.dispatcher._index_repo_from_container", lambda *args, **kwargs: None)
+    monkeypatch.setattr("catocode.dispatcher.prepare_codebase_graph_runtime", lambda *args, **kwargs: None)
+
+    async def fake_execute_sdk_runner(**kwargs):
+        store.add_log(
+            kwargs["activity_id"],
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": "CLAUDE.md remains accurate\n\n__CATOCODE_REPO_MEMORY_DECISION__:skip_update",
+                    "session_id": "sdk-refresh",
+                    "cost_usd": 0.1,
+                }
+            ),
+        )
+        return 0, "sdk-refresh", 0.1
+
+    monkeypatch.setattr("catocode.dispatcher._execute_sdk_runner", fake_execute_sdk_runner)
+
+    await dispatch(
+        activity_id=activity_id,
+        store=store,
+        container_mgr=container_mgr,
+        anthropic_api_key="sk-ant",
+        github_token="ghp-token",
+        verbose=False,
+    )
+
+    assert container_mgr.reset_checkout_calls == [
+        ("/repos/.worktrees/owner-repo/runtime-refresh-session", "merge123")
+    ]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_fix_issue_threads_installation_token_to_container_runtime(monkeypatch, tmp_path):
     from catocode.dispatcher import dispatch
 
