@@ -139,8 +139,6 @@ def _repo_permission_from_payload(payload: dict) -> str:
 def _is_sync_fresh(sync_row: dict | None) -> bool:
     if sync_row is None:
         return False
-    if sync_row.get("last_error"):
-        return False
     synced_at_raw = sync_row.get("synced_at")
     if not synced_at_raw:
         return False
@@ -198,6 +196,8 @@ async def _ensure_visible_repo_cache(
         return False
     sync_row = store.get_user_installation_repo_sync(current_user["id"], installation_id)
     if _is_sync_fresh(sync_row):
+        if sync_row.get("last_error"):
+            return False
         return True
     return await _sync_visible_repos_for_installation(store, current_user, installation_id, github_token)
 

@@ -431,5 +431,5 @@ def test_api_repos_falls_back_to_live_check_when_installation_sync_fails(tmp_pat
     assert second.status_code == 200
     assert [repo["id"] for repo in first.json()] == ["owner-alpha"]
     assert [repo["id"] for repo in second.json()] == ["owner-alpha"]
-    assert sync_mock.await_count == 2
+    assert sync_mock.await_count == 1
     assert live_check_mock.await_count == 2
