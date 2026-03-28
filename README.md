@@ -50,7 +50,7 @@ CatoCode takes a different approach: **a long-running agent that stays beside yo
 
 Don't want to self-host? Use the managed version:
 
-**[www.catocode.com](https://www.catocode.com)** — Connect your GitHub repo, up and running in 5 minutes. No server configuration needed.
+**[catocode.com](https://catocode.com)** — Connect your GitHub repo, up and running in 5 minutes. No server configuration needed.
 
 ---
 
@@ -61,7 +61,7 @@ git clone https://github.com/humeo/cato-code.git
 cd cato-code
 cp .env.example .env          # Add ANTHROPIC_API_KEY and GitHub App credentials
 docker compose up -d
-docker compose exec catocode catocode server --port 8000
+docker compose exec catocode catocode setup --probe
 ```
 
 Then open [http://localhost:3000](http://localhost:3000), connect GitHub, install the App, and click `Watch` on a repo. Full setup details in [Deployment](#deployment).
@@ -135,8 +135,8 @@ You review a PR with full evidence attached. 30 seconds to verify — no local t
 │  └──────────────────────────────────────────────────────────┘    │
 │                                                                  │
 │  ┌─ Webhook Server ────────┐  ┌─ Decision Engine ───────────┐   │
-│  │  /webhook/github/{repo} │→ │  Event → Skill routing      │   │
-│  │  /webhook/app (App-lvl) │  │  Bot loop prevention        │   │
+│  │  /webhook/app           │→ │  Event → Skill routing      │   │
+│  │  /webhook/health        │  │  Bot loop prevention        │   │
 │  │  HMAC-SHA256 verify     │  │  Deduplication (delivery ID) │   │
 │  └─────────────────────────┘  └─────────────────────────────┘   │
 │                                                                  │
@@ -271,6 +271,7 @@ Full variable list: [`.env.example`](.env.example)
 
 ```bash
 docker compose up -d
+docker compose exec catocode catocode setup --probe
 ```
 
 First run builds Docker images (~5-10 min). Subsequent starts use the cache. The service runs continuously and processes events automatically.
@@ -290,13 +291,13 @@ Multiple repos are supported. Installation only makes them visible; `Watch` is t
 
 The dashboard starts automatically with `docker compose up -d`. Open [http://localhost:3000](http://localhost:3000).
 
-Features: real-time activity feed (5s polling), live log streaming (SSE), watch/setup lifecycle, retry setup, cost tracking.
+Features: aggregated dashboard state, live log streaming (SSE), watch/setup lifecycle, retry setup, cost tracking.
 
 > To point at a remote backend, set `NEXT_PUBLIC_API_URL=http://your-server:8000` in `.env`, then run `docker compose up -d --build frontend`.
 
-### 5. Webhooks (recommended)
+### 5. Webhooks (required for GitHub App mode)
 
-Webhooks are the primary trigger path. They cut response latency from minutes to seconds and keep the bot aligned with real repository activity.
+GitHub App webhooks are the primary trigger path. They cut response latency from minutes to seconds and keep the bot aligned with real repository activity.
 
 ```bash
 # Create a public tunnel (macOS)
@@ -304,13 +305,13 @@ brew install cloudflare/cloudflare/cloudflared
 cloudflared tunnel --url http://localhost:8000
 ```
 
-In GitHub repo **Settings → Webhooks**, add:
+In the GitHub App settings, configure:
 
-- **URL**: `https://<tunnel-id>.trycloudflare.com/webhook/github/{owner-repo}`
+- **Callback URL**: `https://<tunnel-id>.trycloudflare.com/auth/github/callback`
+- **Setup URL**: `https://<tunnel-id>.trycloudflare.com/`
+- **Webhook URL**: `https://<tunnel-id>.trycloudflare.com/webhook/app`
 - **Content type**: `application/json`
-- **Events**: Issues, Issue comments, Pull requests, Pull request reviews
-
-> `{owner-repo}` uses hyphen format, e.g. `alice-myproject`
+- **Events**: Issues, Issue comments, Pull requests, Pull request reviews, Installation events
 
 ---
 
@@ -319,6 +320,10 @@ In GitHub repo **Settings → Webhooks**, add:
 ```bash
 # Run the unified GitHub App SaaS server
 catocode server --port 8000
+
+# Validate SaaS configuration and print login/install entrypoints
+catocode setup
+catocode setup --probe
 
 # View repos and recent activity
 catocode status
@@ -352,7 +357,7 @@ cd frontend && bun install && bun dev    # Frontend dev server
 
 ```
 src/catocode/
-├── cli.py                 # Entry point — 7 subcommands
+├── cli.py                 # Entry point — server/daemon/setup/status/logs
 ├── scheduler.py           # 3 async loops, concurrency control
 ├── dispatcher.py          # Activity execution pipeline, timeouts, retries
 ├── skill_renderer.py      # Markdown template → prompt builder
@@ -397,6 +402,6 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 <div align="center">
 
-[Hosted Service](https://www.catocode.com) · [Quick Start](#quick-start) · [Architecture](#architecture) · [CLI Reference](#cli-reference) · [Contributing](#contributing)
+[Hosted Service](https://catocode.com) · [Quick Start](#quick-start) · [Architecture](#architecture) · [CLI Reference](#cli-reference) · [Contributing](#contributing)
 
 </div>

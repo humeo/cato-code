@@ -5,6 +5,7 @@ import asyncio
 import logging
 import sys
 
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,8 +16,11 @@ from rich.panel import Panel
 from .auth import get_auth
 from .config import (
     get_anthropic_api_key,
+    get_base_url,
+    get_frontend_url,
     get_github_app_client_id,
     get_github_app_client_secret,
+    get_github_app_name,
     get_session_secret_key,
 )
 from .container.manager import ContainerManager
@@ -54,12 +58,82 @@ def build_parser() -> argparse.ArgumentParser:
     status_p = subparsers.add_parser("status", help="Show repo or activity status")
     status_p.add_argument("target", nargs="?", help="repo_id or activity_id (omit for all)")
 
+    # --- setup ---
+    setup_p = subparsers.add_parser("setup", help="Validate SaaS config and print login/install entrypoints")
+    setup_p.add_argument("--probe", action="store_true", help="Probe frontend/backend entrypoints after validation")
+
     # --- logs ---
     logs_p = subparsers.add_parser("logs", help="View activity logs")
     logs_p.add_argument("activity_id")
     logs_p.add_argument("--follow", "-f", action="store_true", help="Follow log output")
 
     return parser
+
+
+def _setup_urls() -> dict[str, str]:
+    frontend_url = get_frontend_url().rstrip("/")
+    backend_url = get_base_url().rstrip("/")
+    app_name = get_github_app_name()
+    return {
+        "frontend": frontend_url,
+        "backend": backend_url,
+        "login": f"{backend_url}/auth/github",
+        "install": f"https://github.com/apps/{app_name}/installations/new",
+        "backend_health": f"{backend_url}/health",
+        "webhook_health": f"{backend_url}/webhook/health",
+    }
+
+
+async def _probe_url(name: str, url: str) -> tuple[str, str, bool, int | None]:
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=5.0) as client:
+            response = await client.get(url)
+        return name, url, 200 <= response.status_code < 400, response.status_code
+    except httpx.HTTPError:
+        return name, url, False, None
+
+
+async def cmd_setup(args: argparse.Namespace) -> int:
+    try:
+        get_anthropic_api_key()
+        auth = get_auth()
+        get_github_app_client_id()
+        get_github_app_client_secret()
+        get_session_secret_key()
+    except RuntimeError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        return 1
+
+    urls = _setup_urls()
+    info_lines = [
+        "[bold green]CatoCode Setup[/bold green]",
+        f"Auth:     {auth.auth_type()}",
+        "",
+        "Connect GitHub and install the platform App, then click Watch in the dashboard.",
+        f"Frontend: {urls['frontend']}",
+        f"Backend:  {urls['backend']}",
+        f"Login:    {urls['login']}",
+        f"Install:  {urls['install']}",
+    ]
+    console.print(Panel("\n".join(info_lines), border_style="green"))
+
+    if not args.probe:
+        return 0
+
+    probes = [
+        ("frontend", urls["frontend"]),
+        ("backend-health", urls["backend_health"]),
+        ("webhook-health", urls["webhook_health"]),
+        ("oauth-login", urls["login"]),
+    ]
+    results = [await _probe_url(name, url) for name, url in probes]
+    console.print("[bold]Probe checks[/bold]")
+    for name, url, ok, status in results:
+        status_text = str(status) if status is not None else "error"
+        color = "green" if ok else "red"
+        console.print(f"[{color}]{name:14}[/{color}] {status_text:>5} {url}")
+
+    return 0 if all(ok for _, _, ok, _ in results) else 1
 
 # --- daemon ---
 
@@ -279,6 +353,7 @@ async def run_async(args: argparse.Namespace) -> int:
         "server": cmd_server,
         "daemon": cmd_daemon,
         "status": cmd_status,
+        "setup": cmd_setup,
         "logs": cmd_logs,
     }
 

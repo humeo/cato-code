@@ -54,7 +54,9 @@ frontend/tsconfig.tsbuildinfo
 .playwright-mcp/
 
 # Claude Code and agent skills (local dev tools)
-.claude/
+.claude/*
+!.claude/commands/
+!.claude/commands/*.md
 .agents/
 
 # Playwright CLI session files

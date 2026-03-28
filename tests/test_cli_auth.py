@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 import pytest
+from rich.console import Console
 
 from catocode.auth.base import Auth, GitHubAppTokenProvider
 from catocode.store import Store
@@ -83,3 +84,72 @@ async def test_cmd_daemon_uses_unified_github_app_app(monkeypatch, tmp_path):
     assert exit_code == 0
     assert len(created_apps) == 1
     assert uvicorn_apps == created_apps
+
+
+def test_build_parser_includes_setup_command():
+    from catocode.cli import build_parser
+
+    parser = build_parser()
+
+    args = parser.parse_args(["setup"])
+
+    assert args.command == "setup"
+    assert args.probe is False
+
+
+@pytest.mark.asyncio
+async def test_cmd_setup_prints_saas_entrypoints(monkeypatch):
+    from catocode import cli
+
+    output = Console(record=True, width=120)
+
+    monkeypatch.setattr(cli, "console", output)
+    monkeypatch.setattr(cli, "get_anthropic_api_key", lambda: "sk-ant")
+    monkeypatch.setattr(cli, "get_auth", lambda: FakeGitHubAppAuth())
+    monkeypatch.setattr(cli, "get_github_app_client_id", lambda: "Iv1.testclient")
+    monkeypatch.setattr(cli, "get_github_app_client_secret", lambda: "secret")
+    monkeypatch.setattr(cli, "get_session_secret_key", lambda: "0" * 64)
+
+    exit_code = await cli.cmd_setup(argparse.Namespace(probe=False))
+
+    text = output.export_text()
+    assert exit_code == 0
+    assert "Connect GitHub" in text
+    assert "Frontend: http://localhost:3000" in text
+    assert "Backend:  http://localhost:8000" in text
+    assert "Login:    http://localhost:8000/auth/github" in text
+    assert "Install:  https://github.com/apps/catocode-bot/installations/new" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_setup_probe_reports_all_checks(monkeypatch):
+    from catocode import cli
+
+    output = Console(record=True, width=120)
+    probe_calls: list[tuple[str, str]] = []
+
+    async def fake_probe(name: str, url: str) -> tuple[str, str, bool, int | None]:
+        probe_calls.append((name, url))
+        return name, url, True, 200
+
+    monkeypatch.setattr(cli, "console", output)
+    monkeypatch.setattr(cli, "get_anthropic_api_key", lambda: "sk-ant")
+    monkeypatch.setattr(cli, "get_auth", lambda: FakeGitHubAppAuth())
+    monkeypatch.setattr(cli, "get_github_app_client_id", lambda: "Iv1.testclient")
+    monkeypatch.setattr(cli, "get_github_app_client_secret", lambda: "secret")
+    monkeypatch.setattr(cli, "get_session_secret_key", lambda: "0" * 64)
+    monkeypatch.setattr(cli, "_probe_url", fake_probe)
+
+    exit_code = await cli.cmd_setup(argparse.Namespace(probe=True))
+
+    text = output.export_text()
+    assert exit_code == 0
+    assert probe_calls == [
+        ("frontend", "http://localhost:3000"),
+        ("backend-health", "http://localhost:8000/health"),
+        ("webhook-health", "http://localhost:8000/webhook/health"),
+        ("oauth-login", "http://localhost:8000/auth/github"),
+    ]
+    assert "Probe checks" in text
+    assert "frontend" in text
+    assert "oauth-login" in text
