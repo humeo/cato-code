@@ -1306,6 +1306,7 @@ def _append_activity_envelope(prompt: str, envelope: ActivityEnvelope) -> str:
         "If you cannot provide every optional field, still return a valid JSON object with the required fields.\n\n"
         "Expected fields:\n"
         "- `writebacks`: a list of performed GitHub writebacks such as issue comments, review replies, PR creation, or pushes\n"
+        "- `artifacts.localization`: ranked location hints with `entry_points`, `explored_paths`, `candidate_locations`, `ranked_locations`, `finish_reason`, and `search_metrics` when the activity performs localization\n"
         "- `artifacts.verification`: proof-of-work summary with status, commands, and evidence paths when available\n"
         "- `artifacts.resolution`: session memory with `hypotheses`, `todos`, and `checkpoints` so later runs can resume cleanly\n"
     )

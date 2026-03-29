@@ -150,6 +150,9 @@ def test_build_analyze_issue_prompt_has_no_preloaded_code_context_section():
     )
     assert "Pre-loaded Code Context" not in prompt
     assert "ActivityResultEnvelope" in prompt
+    assert "finish_search" in prompt
+    assert "ranked_locations" in prompt
+    assert "artifacts.localization" in prompt
 
 
 def test_issue_skills_direct_agent_to_codebase_graph():

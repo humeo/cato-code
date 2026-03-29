@@ -377,12 +377,15 @@ You are analyzing issue #{issue_number} in repository {repo_id}.
 
 Follow the analysis workflow in this skill:
 1. Check for duplicates first (Step 0 above)
-2. Classify the issue type
-3. For bugs: analyze root cause and attempt reproduction
-4. Suggest 2-3 ranked solutions
-5. Post analysis comment with `/approve` instruction
-6. Finish with a valid `ActivityResultEnvelope` JSON object as the final result text
-7. Include `writebacks` plus structured findings in `artifacts`
+2. Extract entry points and run the localization workflow with `find_file`, `find_code_def`, `find_code_content`, `find_child_unit`, and `finish_search`
+3. Classify the issue type
+4. For bugs: analyze root cause and attempt reproduction
+5. Suggest 2-3 ranked solutions
+6. Post analysis comment with `/approve` instruction
+7. Finish with a valid `ActivityResultEnvelope` JSON object as the final result text
+8. Include `writebacks` plus structured findings in `artifacts`
+9. Include `artifacts.localization` with `entry_points`, `explored_paths`, `candidate_locations`, `ranked_locations`, `finish_reason`, and `search_metrics`
+10. Each `ranked_locations` item must include `rank`, `file_path`, `line_start`, `line_end`, `symbol_name`, `symbol_kind`, `role`, `summary`, and `why_relevant`
 
 Begin now.
 """
