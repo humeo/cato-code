@@ -13,6 +13,13 @@ logger = logging.getLogger(__name__)
 
 _FILES_RE = re.compile(r"^\s*Files:\s*(\d+)\s*$", re.MULTILINE)
 _SYMBOLS_RE = re.compile(r"^\s*Symbols:\s*(\d+)\s*$", re.MULTILINE)
+LOCALIZATION_TOOL_COMMANDS = (
+    "find_file",
+    "find_code_def",
+    "find_code_content",
+    "find_child_unit",
+    "finish_search",
+)
 
 
 def _parse_stats_counts(output: str) -> tuple[int, int] | None:

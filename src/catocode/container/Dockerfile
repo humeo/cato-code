@@ -55,7 +55,14 @@ RUN uv pip install --system /app/vendor/codebase-graph
 
 # Layer 11: Copy SDK runner script
 COPY scripts/run_activity.py /app/run_activity.py
-RUN chown catocode:catocode /app/run_activity.py
+COPY scripts/localization_cli.py /app/localization_cli.py
+RUN chmod +x /app/run_activity.py /app/localization_cli.py \
+    && ln -sf /app/localization_cli.py /usr/local/bin/find_file \
+    && ln -sf /app/localization_cli.py /usr/local/bin/find_code_def \
+    && ln -sf /app/localization_cli.py /usr/local/bin/find_code_content \
+    && ln -sf /app/localization_cli.py /usr/local/bin/find_child_unit \
+    && ln -sf /app/localization_cli.py /usr/local/bin/finish_search \
+    && chown catocode:catocode /app/run_activity.py /app/localization_cli.py
 
 # Layer 12: Copy RepoCraft skills to container
 COPY skills/ /home/catocode/.claude/skills/

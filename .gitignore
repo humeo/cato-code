@@ -73,6 +73,8 @@ frontend/tsconfig.tsbuildinfo
 # Local-only tooling and design artifacts
 openspec/
 scripts/
+!src/catocode/container/scripts/
+!src/catocode/container/scripts/*.py
 readme-header.html
 docs/*.md
 

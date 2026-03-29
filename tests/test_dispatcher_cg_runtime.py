@@ -180,6 +180,18 @@ def test_prepare_codebase_graph_runtime_is_best_effort_when_repair_fails(store):
     assert store.get_codebase_graph_state("owner-repo") is None
 
 
+def test_localization_tool_commands_match_paper_shaped_surface():
+    from catocode.codebase_graph_runtime import LOCALIZATION_TOOL_COMMANDS
+
+    assert LOCALIZATION_TOOL_COMMANDS == (
+        "find_file",
+        "find_code_def",
+        "find_code_content",
+        "find_child_unit",
+        "finish_search",
+    )
+
+
 def test_host_index_rebuild_does_not_skip_when_only_cg_state_exists(store):
     from catocode.dispatcher import _index_repo_from_container
 
