@@ -133,6 +133,12 @@ export function ActivityDetail({ activityId, initialActivity = null, initialLogs
   const runtimeMetrics = activity.runtime_result?.metrics;
   const steps = activity.steps ?? [];
   const sessionResolution = activity.runtime_session?.resolution_state;
+  const selectedHypothesisId =
+    typeof sessionResolution?.selected_hypothesis_id === "string" ? sessionResolution.selected_hypothesis_id : null;
+  const selectedHypothesis =
+    selectedHypothesisId && Array.isArray(sessionResolution?.hypotheses)
+      ? sessionResolution.hypotheses.find((item) => String(item.id ?? "") === selectedHypothesisId)
+      : null;
   const verificationArtifact =
     activity.runtime_result?.artifacts && typeof activity.runtime_result.artifacts === "object"
       ? (activity.runtime_result.artifacts.verification as Record<string, unknown> | undefined)
@@ -338,6 +344,21 @@ export function ActivityDetail({ activityId, initialActivity = null, initialLogs
                           <span>{sessionResolution.todos?.length ?? 0} todos</span>
                           <span>{sessionResolution.checkpoints?.length ?? 0} checkpoints</span>
                         </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <span>{sessionResolution.insights?.length ?? 0} insights</span>
+                          <span>{sessionResolution.comparisons?.length ?? 0} comparisons</span>
+                          <span>{sessionResolution.events?.length ?? 0} events</span>
+                        </div>
+                        {selectedHypothesisId && (
+                          <div>
+                            <div className="mb-1 text-gray-600">Selected Hypothesis</div>
+                            <div className="rounded bg-black/20 px-2 py-1">
+                              {selectedHypothesis
+                                ? String(selectedHypothesis.summary ?? selectedHypothesis.id ?? selectedHypothesisId)
+                                : selectedHypothesisId}
+                            </div>
+                          </div>
+                        )}
                         {sessionResolution.hypotheses && sessionResolution.hypotheses.length > 0 && (
                           <div>
                             <div className="mb-1 text-gray-600">Hypotheses</div>
@@ -357,6 +378,30 @@ export function ActivityDetail({ activityId, initialActivity = null, initialLogs
                               {sessionResolution.todos.map((item, index) => (
                                 <div key={`todo-${index}`} className="rounded bg-black/20 px-2 py-1">
                                   {String(item.content ?? item.id ?? "todo")}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {sessionResolution.insights && sessionResolution.insights.length > 0 && (
+                          <div>
+                            <div className="mb-1 text-gray-600">Insights</div>
+                            <div className="space-y-1">
+                              {sessionResolution.insights.map((item, index) => (
+                                <div key={`insight-${index}`} className="rounded bg-black/20 px-2 py-1">
+                                  {String(item.insight ?? item.id ?? "insight")}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {sessionResolution.comparisons && sessionResolution.comparisons.length > 0 && (
+                          <div>
+                            <div className="mb-1 text-gray-600">Comparisons</div>
+                            <div className="space-y-1">
+                              {sessionResolution.comparisons.map((item, index) => (
+                                <div key={`comparison-${index}`} className="rounded bg-black/20 px-2 py-1">
+                                  {String(item.summary ?? item.id ?? "comparison")}
                                 </div>
                               ))}
                             </div>
@@ -413,6 +458,11 @@ export function ActivityDetail({ activityId, initialActivity = null, initialLogs
                         <span>{Array.isArray(resolutionArtifact.hypotheses) ? resolutionArtifact.hypotheses.length : 0} hypotheses</span>
                         <span>{Array.isArray(resolutionArtifact.todos) ? resolutionArtifact.todos.length : 0} todos</span>
                         <span>{Array.isArray(resolutionArtifact.checkpoints) ? resolutionArtifact.checkpoints.length : 0} checkpoints</span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-3 gap-2 text-gray-200">
+                        <span>{Array.isArray(resolutionArtifact.insights) ? resolutionArtifact.insights.length : 0} insights</span>
+                        <span>{Array.isArray(resolutionArtifact.comparisons) ? resolutionArtifact.comparisons.length : 0} comparisons</span>
+                        <span>{Array.isArray(resolutionArtifact.events) ? resolutionArtifact.events.length : 0} events</span>
                       </div>
                     </div>
                   )}

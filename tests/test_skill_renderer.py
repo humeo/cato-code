@@ -85,6 +85,9 @@ def test_build_fix_issue_prompt():
     assert "hypothesis_plan" in prompt
     assert "hypothesis_git" in prompt
     assert "ranked_locations" in prompt
+    assert "selected_hypothesis_id" in prompt
+    assert "comparisons" in prompt
+    assert "events" in prompt
     assert "repocraft/fix" not in prompt
 
 

@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .localization_artifact import InvalidLocalizationArtifact, LocalizationArtifact
+from .resolution_artifact import InvalidResolutionArtifact, ResolutionArtifact
 
 
 class InvalidActivityResultEnvelope(ValueError):
@@ -79,6 +80,14 @@ class ActivityResultEnvelope:
                     localization = localization.to_dict()
                 normalized_artifacts["localization"] = LocalizationArtifact.from_dict(localization).to_dict()
             except InvalidLocalizationArtifact as exc:
+                raise InvalidActivityResultEnvelope(str(exc)) from exc
+        if "resolution" in normalized_artifacts:
+            resolution = normalized_artifacts["resolution"]
+            try:
+                if isinstance(resolution, ResolutionArtifact):
+                    resolution = resolution.to_dict()
+                normalized_artifacts["resolution"] = ResolutionArtifact.from_dict(resolution).to_dict()
+            except InvalidResolutionArtifact as exc:
                 raise InvalidActivityResultEnvelope(str(exc)) from exc
 
         metrics = payload["metrics"]

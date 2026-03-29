@@ -149,7 +149,7 @@ Follow the step-by-step workflow in this skill. Remember:
 9. Keep the session branch as the canonical branch for this worktree; if you create hypothesis branches, treat them as temporary resolution branches only
 10. Follow the paper rule: one todo = one action = one checkpoint commit
 11. Finish with a valid `ActivityResultEnvelope` JSON object as the final result text
-12. Include `writebacks`, `artifacts.verification`, and `artifacts.resolution` with hypotheses, todos, checkpoints, and insights
+12. Include `writebacks`, `artifacts.verification`, and `artifacts.resolution` with hypotheses, todos, checkpoints, insights, comparisons, events, and `selected_hypothesis_id`
 
 Begin now.
 """

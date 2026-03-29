@@ -349,3 +349,25 @@ def test_build_activity_envelope_does_not_leak_localization_across_runtime_sessi
     envelope = _build_activity_envelope(activity, repo, runtime_session, store, max_turns=200)
 
     assert "localization" not in envelope.memory
+
+
+def test_validate_resolution_workflow_rejects_missing_compare_for_multi_hypothesis():
+    from catocode.dispatcher import _validate_resolution_workflow
+
+    error = _validate_resolution_workflow(
+        "fix_issue",
+        {
+            "hypotheses": [
+                {"id": "h1", "summary": "Path A", "status": "active", "branch_name": "catocode/h1"},
+                {"id": "h2", "summary": "Path B", "status": "active", "branch_name": "catocode/h2"},
+            ],
+            "todos": [],
+            "checkpoints": [{"id": "base", "label": "base", "status": "done", "commit_sha": "abc123"}],
+            "insights": [],
+            "comparisons": [],
+            "events": [],
+            "selected_hypothesis_id": "h1",
+        },
+    )
+
+    assert error == "Multi-hypothesis resolution requires compare_hypotheses"

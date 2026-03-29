@@ -251,6 +251,8 @@ CREATE TABLE IF NOT EXISTS runtime_session_hypotheses (
     item_id TEXT NOT NULL,
     summary TEXT,
     status TEXT,
+    branch_name TEXT,
+    selected INTEGER DEFAULT 0,
     payload TEXT NOT NULL,
     PRIMARY KEY (session_id, item_id),
     FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
@@ -262,6 +264,9 @@ CREATE TABLE IF NOT EXISTS runtime_session_todos (
     item_id TEXT NOT NULL,
     content TEXT,
     status TEXT,
+    hypothesis_id TEXT,
+    checkpoint_id TEXT,
+    sequence INTEGER,
     payload TEXT NOT NULL,
     PRIMARY KEY (session_id, item_id),
     FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
@@ -274,6 +279,45 @@ CREATE TABLE IF NOT EXISTS runtime_session_checkpoints (
     label TEXT,
     status TEXT,
     commit_sha TEXT,
+    hypothesis_id TEXT,
+    todo_id TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_session_insights (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    hypothesis_id TEXT,
+    todo_id TEXT,
+    impact TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_session_comparisons (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    selected_hypothesis_id TEXT,
+    summary TEXT,
+    status TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_session_resolution_events (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    kind TEXT,
+    status TEXT,
+    hypothesis_id TEXT,
+    comparison_id TEXT,
     payload TEXT NOT NULL,
     PRIMARY KEY (session_id, item_id),
     FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
@@ -386,6 +430,8 @@ WHERE kind = 'refresh_repo_memory_review' AND status IN ('pending', 'running')""
     item_id TEXT NOT NULL,
     summary TEXT,
     status TEXT,
+    branch_name TEXT,
+    selected INTEGER DEFAULT 0,
     payload TEXT NOT NULL,
     PRIMARY KEY (session_id, item_id),
     FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
@@ -396,6 +442,9 @@ WHERE kind = 'refresh_repo_memory_review' AND status IN ('pending', 'running')""
     item_id TEXT NOT NULL,
     content TEXT,
     status TEXT,
+    hypothesis_id TEXT,
+    checkpoint_id TEXT,
+    sequence INTEGER,
     payload TEXT NOT NULL,
     PRIMARY KEY (session_id, item_id),
     FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
@@ -407,10 +456,53 @@ WHERE kind = 'refresh_repo_memory_review' AND status IN ('pending', 'running')""
     label TEXT,
     status TEXT,
     commit_sha TEXT,
+    hypothesis_id TEXT,
+    todo_id TEXT,
     payload TEXT NOT NULL,
     PRIMARY KEY (session_id, item_id),
     FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
 )""",
+    """CREATE TABLE IF NOT EXISTS runtime_session_insights (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    hypothesis_id TEXT,
+    todo_id TEXT,
+    impact TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+)""",
+    """CREATE TABLE IF NOT EXISTS runtime_session_comparisons (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    selected_hypothesis_id TEXT,
+    summary TEXT,
+    status TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+)""",
+    """CREATE TABLE IF NOT EXISTS runtime_session_resolution_events (
+    session_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    kind TEXT,
+    status TEXT,
+    hypothesis_id TEXT,
+    comparison_id TEXT,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, item_id),
+    FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+)""",
+    "ALTER TABLE runtime_session_hypotheses ADD COLUMN branch_name TEXT",
+    "ALTER TABLE runtime_session_hypotheses ADD COLUMN selected INTEGER DEFAULT 0",
+    "ALTER TABLE runtime_session_todos ADD COLUMN hypothesis_id TEXT",
+    "ALTER TABLE runtime_session_todos ADD COLUMN checkpoint_id TEXT",
+    "ALTER TABLE runtime_session_todos ADD COLUMN sequence INTEGER",
+    "ALTER TABLE runtime_session_checkpoints ADD COLUMN hypothesis_id TEXT",
+    "ALTER TABLE runtime_session_checkpoints ADD COLUMN todo_id TEXT",
     "ALTER TABLE runtime_sessions ADD COLUMN gc_error TEXT",
     "ALTER TABLE runtime_sessions ADD COLUMN resolution_state TEXT",
     "ALTER TABLE runtime_session_pr_links ADD COLUMN pr_state TEXT NOT NULL DEFAULT 'open'",
@@ -972,23 +1064,33 @@ class Store:
         hypotheses = resolution.get("hypotheses", [])
         todos = resolution.get("todos", [])
         checkpoints = resolution.get("checkpoints", [])
+        insights = resolution.get("insights", [])
+        comparisons = resolution.get("comparisons", [])
+        events = resolution.get("events", [])
+        selected_hypothesis_id = resolution.get("selected_hypothesis_id")
 
         self._db.execute("DELETE FROM runtime_session_hypotheses WHERE session_id = ?", (session_id,))
         self._db.execute("DELETE FROM runtime_session_todos WHERE session_id = ?", (session_id,))
         self._db.execute("DELETE FROM runtime_session_checkpoints WHERE session_id = ?", (session_id,))
+        self._db.execute("DELETE FROM runtime_session_insights WHERE session_id = ?", (session_id,))
+        self._db.execute("DELETE FROM runtime_session_comparisons WHERE session_id = ?", (session_id,))
+        self._db.execute("DELETE FROM runtime_session_resolution_events WHERE session_id = ?", (session_id,))
 
         for index, item in enumerate(hypotheses):
             payload = json.dumps(item)
+            hypothesis_id = str(item.get("id") or f"hypothesis-{index}")
             self._db.execute(
                 """INSERT INTO runtime_session_hypotheses
-                   (session_id, item_order, item_id, summary, status, payload)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (session_id, item_order, item_id, summary, status, branch_name, selected, payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     index,
-                    str(item.get("id") or f"hypothesis-{index}"),
+                    hypothesis_id,
                     item.get("summary"),
                     item.get("status"),
+                    item.get("branch_name"),
+                    1 if item.get("selected") or selected_hypothesis_id == hypothesis_id else 0,
                     payload,
                 ),
             )
@@ -997,14 +1099,17 @@ class Store:
             payload = json.dumps(item)
             self._db.execute(
                 """INSERT INTO runtime_session_todos
-                   (session_id, item_order, item_id, content, status, payload)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (session_id, item_order, item_id, content, status, hypothesis_id, checkpoint_id, sequence, payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     index,
                     str(item.get("id") or f"todo-{index}"),
                     item.get("content"),
                     item.get("status"),
+                    item.get("hypothesis_id"),
+                    item.get("checkpoint_id"),
+                    item.get("sequence"),
                     payload,
                 ),
             )
@@ -1013,8 +1118,8 @@ class Store:
             payload = json.dumps(item)
             self._db.execute(
                 """INSERT INTO runtime_session_checkpoints
-                   (session_id, item_order, item_id, label, status, commit_sha, payload)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (session_id, item_order, item_id, label, status, commit_sha, hypothesis_id, todo_id, payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     index,
@@ -1022,6 +1127,60 @@ class Store:
                     item.get("label"),
                     item.get("status"),
                     item.get("commit_sha"),
+                    item.get("hypothesis_id"),
+                    item.get("todo_id"),
+                    payload,
+                ),
+            )
+
+        for index, item in enumerate(insights):
+            payload = json.dumps(item)
+            self._db.execute(
+                """INSERT INTO runtime_session_insights
+                   (session_id, item_order, item_id, hypothesis_id, todo_id, impact, payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    index,
+                    str(item.get("id") or f"insight-{index}"),
+                    item.get("hypothesis_id"),
+                    item.get("todo_id"),
+                    item.get("impact"),
+                    payload,
+                ),
+            )
+
+        for index, item in enumerate(comparisons):
+            payload = json.dumps(item)
+            self._db.execute(
+                """INSERT INTO runtime_session_comparisons
+                   (session_id, item_order, item_id, selected_hypothesis_id, summary, status, payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    index,
+                    str(item.get("id") or f"comparison-{index}"),
+                    item.get("selected_hypothesis_id"),
+                    item.get("summary"),
+                    item.get("status"),
+                    payload,
+                ),
+            )
+
+        for index, item in enumerate(events):
+            payload = json.dumps(item)
+            self._db.execute(
+                """INSERT INTO runtime_session_resolution_events
+                   (session_id, item_order, item_id, kind, status, hypothesis_id, comparison_id, payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    index,
+                    str(item.get("id") or f"event-{index}"),
+                    item.get("kind"),
+                    item.get("status"),
+                    item.get("hypothesis_id"),
+                    item.get("comparison_id"),
                     payload,
                 ),
             )
@@ -1048,6 +1207,83 @@ class Store:
             (session_id,),
         )
         return [json.loads(row["payload"]) for row in rows]
+
+    def list_runtime_session_insights(self, session_id: str) -> list[dict]:
+        rows = self._db.execute(
+            "SELECT payload FROM runtime_session_insights WHERE session_id = ? ORDER BY item_order",
+            (session_id,),
+        )
+        return [json.loads(row["payload"]) for row in rows]
+
+    def list_runtime_session_comparisons(self, session_id: str) -> list[dict]:
+        rows = self._db.execute(
+            "SELECT payload FROM runtime_session_comparisons WHERE session_id = ? ORDER BY item_order",
+            (session_id,),
+        )
+        return [json.loads(row["payload"]) for row in rows]
+
+    def list_runtime_session_resolution_events(self, session_id: str) -> list[dict]:
+        rows = self._db.execute(
+            "SELECT payload FROM runtime_session_resolution_events WHERE session_id = ? ORDER BY item_order",
+            (session_id,),
+        )
+        return [json.loads(row["payload"]) for row in rows]
+
+    def get_runtime_session_hypothesis(self, session_id: str, hypothesis_id: str) -> dict | None:
+        row = self._db.execute_one(
+            "SELECT payload FROM runtime_session_hypotheses WHERE session_id = ? AND item_id = ?",
+            (session_id, hypothesis_id),
+        )
+        if row is None:
+            return None
+        return json.loads(row["payload"])
+
+    def get_runtime_session_todo(self, session_id: str, todo_id: str) -> dict | None:
+        row = self._db.execute_one(
+            "SELECT payload FROM runtime_session_todos WHERE session_id = ? AND item_id = ?",
+            (session_id, todo_id),
+        )
+        if row is None:
+            return None
+        return json.loads(row["payload"])
+
+    def get_runtime_session_comparison(self, session_id: str, comparison_id: str) -> dict | None:
+        row = self._db.execute_one(
+            "SELECT payload FROM runtime_session_comparisons WHERE session_id = ? AND item_id = ?",
+            (session_id, comparison_id),
+        )
+        if row is None:
+            return None
+        return json.loads(row["payload"])
+
+    def get_runtime_session_selected_hypothesis(self, session_id: str) -> dict | None:
+        row = self._db.execute_one(
+            """SELECT payload
+               FROM runtime_session_hypotheses
+               WHERE session_id = ?
+                 AND selected = 1
+               ORDER BY item_order
+               LIMIT 1""",
+            (session_id,),
+        )
+        if row is not None:
+            return json.loads(row["payload"])
+        session = self.get_runtime_session(session_id)
+        if session is None:
+            return None
+        raw_resolution_state = session.get("resolution_state")
+        if not isinstance(raw_resolution_state, str) or not raw_resolution_state.strip():
+            return None
+        try:
+            parsed = json.loads(raw_resolution_state)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        selected_hypothesis_id = parsed.get("selected_hypothesis_id")
+        if isinstance(selected_hypothesis_id, str) and selected_hypothesis_id.strip():
+            return self.get_runtime_session_hypothesis(session_id, selected_hypothesis_id)
+        return None
 
     def get_latest_runtime_session_checkpoint(self, session_id: str) -> dict | None:
         row = self._db.execute_one(
@@ -1083,7 +1319,10 @@ class Store:
         hypotheses = self.list_runtime_session_hypotheses(session_id)
         todos = self.list_runtime_session_todos(session_id)
         checkpoints = self.list_runtime_session_checkpoints(session_id)
-        insights: list[dict] = []
+        insights = self.list_runtime_session_insights(session_id)
+        comparisons = self.list_runtime_session_comparisons(session_id)
+        events = self.list_runtime_session_resolution_events(session_id)
+        selected_hypothesis_id: str | None = None
 
         raw_resolution_state = session.get("resolution_state")
         parsed_resolution_state: dict | None = None
@@ -1094,18 +1333,38 @@ class Store:
                 parsed = None
             if isinstance(parsed, dict):
                 parsed_resolution_state = parsed
-                raw_insights = parsed.get("insights", [])
-                if isinstance(raw_insights, list):
-                    insights = [dict(item) for item in raw_insights if isinstance(item, dict)]
+                if not insights:
+                    raw_insights = parsed.get("insights", [])
+                    if isinstance(raw_insights, list):
+                        insights = [dict(item) for item in raw_insights if isinstance(item, dict)]
+                if not comparisons:
+                    raw_comparisons = parsed.get("comparisons", [])
+                    if isinstance(raw_comparisons, list):
+                        comparisons = [dict(item) for item in raw_comparisons if isinstance(item, dict)]
+                if not events:
+                    raw_events = parsed.get("events", [])
+                    if isinstance(raw_events, list):
+                        events = [dict(item) for item in raw_events if isinstance(item, dict)]
+                raw_selected_hypothesis_id = parsed.get("selected_hypothesis_id")
+                if isinstance(raw_selected_hypothesis_id, str) and raw_selected_hypothesis_id.strip():
+                    selected_hypothesis_id = raw_selected_hypothesis_id
 
-        if not (hypotheses or todos or checkpoints or insights or parsed_resolution_state):
+        if not (hypotheses or todos or checkpoints or insights or comparisons or events or parsed_resolution_state):
             return None
+
+        if selected_hypothesis_id is None:
+            selected = self.get_runtime_session_selected_hypothesis(session_id)
+            if isinstance(selected, dict):
+                selected_hypothesis_id = selected.get("id")
 
         return {
             "hypotheses": hypotheses or (list(parsed_resolution_state.get("hypotheses", [])) if parsed_resolution_state else []),
             "todos": todos or (list(parsed_resolution_state.get("todos", [])) if parsed_resolution_state else []),
             "checkpoints": checkpoints or (list(parsed_resolution_state.get("checkpoints", [])) if parsed_resolution_state else []),
             "insights": insights,
+            "comparisons": comparisons,
+            "events": events,
+            "selected_hypothesis_id": selected_hypothesis_id,
         }
 
     def list_activities(self, repo_id: str | None = None, user_id: str | None = None) -> list[dict]:

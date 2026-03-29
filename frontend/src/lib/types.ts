@@ -32,6 +32,10 @@ export interface RuntimeSession {
     hypotheses?: Array<Record<string, unknown>>;
     todos?: Array<Record<string, unknown>>;
     checkpoints?: Array<Record<string, unknown>>;
+    insights?: Array<Record<string, unknown>>;
+    comparisons?: Array<Record<string, unknown>>;
+    events?: Array<Record<string, unknown>>;
+    selected_hypothesis_id?: string | null;
   } | null;
 }
 

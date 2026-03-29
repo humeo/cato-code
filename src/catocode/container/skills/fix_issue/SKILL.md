@@ -313,6 +313,9 @@ Your final result text must be a valid `ActivityResultEnvelope` JSON object. In 
 - `todos`
 - `checkpoints`
 - `insights`
+- `comparisons`
+- `events`
+- `selected_hypothesis_id`
 
 Each semantic checkpoint should include a `label`, `status`, and `commit_sha`.
 

@@ -12,6 +12,7 @@ from .config import parse_repo_url
 from .github.commenter import failure_comment, post_issue_comment
 from .github.issue_fetcher import fetch_issue
 from .localization_artifact import LocalizationArtifact
+from .resolution_artifact import InvalidResolutionArtifact, ResolutionArtifact
 from .runtime_envelope import ActivityEnvelope, ActivityResultEnvelope, InvalidActivityResultEnvelope
 from .session_runtime import (
     finalize_runtime_session,
@@ -548,12 +549,25 @@ async def dispatch(
             merged_metadata = _merge_activity_metadata(activity, activity_result.to_dict())
             store.update_activity(activity_id, metadata=merged_metadata)
             _record_runtime_result_steps(store, activity_id, activity_result)
+            resolution_state = _normalize_resolution_state(activity_result)
+            workflow_error = None
+            if resolution_state is not None:
+                workflow_error = _validate_resolution_workflow(activity["kind"], resolution_state)
+                if workflow_error is not None:
+                    store.upsert_activity_step(
+                        activity_id,
+                        "resolution",
+                        status="failed",
+                        reason=workflow_error,
+                        metadata={"error": workflow_error},
+                    )
+                    exit_code = 1
+                    summary = workflow_error
             if runtime_session is not None:
                 linked_pr_number = _extract_pr_number_from_writebacks(activity_result)
                 if linked_pr_number is not None:
                     store.link_runtime_session_pr(runtime_session["id"], linked_pr_number)
-                resolution_state = _normalize_resolution_state(activity_result)
-                if resolution_state is not None:
+                if resolution_state is not None and workflow_error is None:
                     store.replace_runtime_session_resolution(runtime_session["id"], resolution_state)
                     runtime_session = store.get_runtime_session(runtime_session["id"]) or runtime_session
         elif runtime_session is not None:
@@ -1308,7 +1322,7 @@ def _append_activity_envelope(prompt: str, envelope: ActivityEnvelope) -> str:
         "- `writebacks`: a list of performed GitHub writebacks such as issue comments, review replies, PR creation, or pushes\n"
         "- `artifacts.localization`: ranked location hints with `entry_points`, `explored_paths`, `candidate_locations`, `ranked_locations`, `finish_reason`, and `search_metrics` when the activity performs localization\n"
         "- `artifacts.verification`: proof-of-work summary with status, commands, and evidence paths when available\n"
-        "- `artifacts.resolution`: session memory with `hypotheses`, `todos`, and `checkpoints` so later runs can resume cleanly\n"
+        "- `artifacts.resolution`: session memory with `hypotheses`, `todos`, `checkpoints`, `insights`, `comparisons`, `events`, and `selected_hypothesis_id` so later runs can resume cleanly\n"
     )
 
 
@@ -1316,25 +1330,66 @@ def _normalize_resolution_state(runtime_result: ActivityResultEnvelope) -> dict 
     resolution = runtime_result.artifacts.get("resolution")
     if not isinstance(resolution, dict):
         return None
-
-    def _normalize_items(key: str) -> list[dict]:
-        value = resolution.get(key, [])
-        if not isinstance(value, list):
-            return []
-        normalized: list[dict] = []
-        for item in value:
-            if isinstance(item, dict):
-                normalized.append(dict(item))
+    try:
+        normalized = ResolutionArtifact.from_dict(resolution).to_dict()
+    except InvalidResolutionArtifact:
+        return None
+    if any(
+        normalized.get(key)
+        for key in ("hypotheses", "todos", "checkpoints", "insights", "comparisons", "events")
+    ) or normalized.get("selected_hypothesis_id"):
         return normalized
+    return None
 
-    normalized = {
-        "hypotheses": _normalize_items("hypotheses"),
-        "todos": _normalize_items("todos"),
-        "checkpoints": _normalize_items("checkpoints"),
-        "insights": _normalize_items("insights"),
+
+def _validate_resolution_workflow(activity_kind: str, resolution_state: dict) -> str | None:
+    if activity_kind not in {"fix_issue", "respond_review"}:
+        return None
+
+    hypotheses = resolution_state.get("hypotheses", [])
+    todos = resolution_state.get("todos", [])
+    checkpoints = resolution_state.get("checkpoints", [])
+    comparisons = resolution_state.get("comparisons", [])
+    events = resolution_state.get("events", [])
+    selected_hypothesis_id = resolution_state.get("selected_hypothesis_id")
+
+    if hypotheses and not any(checkpoint.get("id") == "base" for checkpoint in checkpoints if isinstance(checkpoint, dict)):
+        return "Resolution workflow must include a base checkpoint"
+
+    if hypotheses and any(not hypothesis.get("branch_name") for hypothesis in hypotheses if isinstance(hypothesis, dict)):
+        return "Each hypothesis must include a branch_name"
+
+    checkpoint_ids = {item.get("id") for item in checkpoints if isinstance(item, dict)}
+    checkpoint_todo_pairs = {
+        (item.get("hypothesis_id"), item.get("todo_id"))
+        for item in checkpoints
+        if isinstance(item, dict) and item.get("todo_id")
     }
-    if any(normalized.values()):
-        return normalized
+    for todo in todos:
+        if not isinstance(todo, dict):
+            continue
+        if not todo.get("hypothesis_id"):
+            return "Each todo must reference a hypothesis_id"
+        if todo.get("status") in {"done", "confirmed"}:
+            checkpoint_id = todo.get("checkpoint_id")
+            if checkpoint_id:
+                if checkpoint_id not in checkpoint_ids:
+                    return "Done todos must reference an existing checkpoint_id"
+            elif (todo.get("hypothesis_id"), todo.get("id")) not in checkpoint_todo_pairs:
+                return "Done todos must be bound to a semantic checkpoint"
+
+    if len(hypotheses) > 1 and not comparisons:
+        return "Multi-hypothesis resolution requires compare_hypotheses"
+
+    if selected_hypothesis_id and not any(
+        isinstance(event, dict)
+        and event.get("kind") == "merge_solution"
+        and event.get("status") not in {"failed", "error"}
+        and (event.get("hypothesis_id") in {None, selected_hypothesis_id})
+        for event in events
+    ):
+        return "Selected hypothesis requires a merge_solution event"
+
     return None
 
 
@@ -1466,6 +1521,39 @@ def _record_runtime_result_steps(store: "Store", activity_id: str, runtime_resul
             "insight_count": insight_count,
         },
     )
+
+    selected_hypothesis_id = resolution_state.get("selected_hypothesis_id")
+    if isinstance(selected_hypothesis_id, str) and selected_hypothesis_id:
+        store.upsert_activity_step(
+            activity_id,
+            "selected_hypothesis",
+            status="done",
+            reason=selected_hypothesis_id,
+            metadata={"selected_hypothesis_id": selected_hypothesis_id},
+        )
+
+    for comparison in resolution_state.get("comparisons", []):
+        comparison_id = comparison.get("id") or comparison.get("selected_hypothesis_id") or "comparison"
+        step_key = f"comparison:{_slugify(str(comparison_id)) or 'comparison'}"
+        store.upsert_activity_step(
+            activity_id,
+            step_key,
+            status="done" if comparison.get("status") not in {"failed", "error"} else "failed",
+            reason=comparison.get("summary") or str(comparison_id),
+            metadata=comparison,
+        )
+
+    for event in resolution_state.get("events", []):
+        event_kind = event.get("kind") or "event"
+        event_id = event.get("id") or event.get("summary") or event_kind
+        step_key = f"{_slugify(str(event_kind)) or 'event'}:{_slugify(str(event_id)) or 'event'}"
+        store.upsert_activity_step(
+            activity_id,
+            step_key,
+            status="done" if event.get("status") not in {"failed", "error"} else "failed",
+            reason=event.get("summary") or str(event_kind),
+            metadata=event,
+        )
 
     for index, checkpoint in enumerate(resolution_state["checkpoints"], start=1):
         label = checkpoint.get("label") or checkpoint.get("id") or f"checkpoint-{index}"

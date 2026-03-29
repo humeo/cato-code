@@ -201,11 +201,43 @@ async def test_dispatch_fix_issue_uses_runtime_session_worktree_and_persists_sdk
                 "decision": {"kind": "fix_issue"},
                 "verification": {"status": "passed", "summary": "pytest tests/test_token.py::test_empty_input"},
                 "resolution": {
-                    "hypotheses": [{"id": "h1", "summary": "Validate empty token input", "status": "confirmed"}],
-                    "todos": [{"id": "t2", "content": "Run regression suite", "status": "done"}],
-                    "checkpoints": [{"id": "c2", "label": "verified-fix", "status": "done", "commit_sha": "abc123"}],
+                    "hypotheses": [
+                        {
+                            "id": "h1",
+                            "summary": "Validate empty token input",
+                            "status": "confirmed",
+                            "branch_name": "catocode/h1",
+                            "selected": True,
+                        }
+                    ],
+                    "todos": [
+                        {
+                            "id": "t2",
+                            "hypothesis_id": "h1",
+                            "checkpoint_id": "c2",
+                            "content": "Run regression suite",
+                            "status": "done",
+                        }
+                    ],
+                    "checkpoints": [
+                        {
+                            "id": "base",
+                            "label": "base",
+                            "status": "done",
+                            "commit_sha": "base123",
+                        },
+                        {
+                            "id": "c2",
+                            "label": "verified-fix",
+                            "status": "done",
+                            "commit_sha": "abc123",
+                            "hypothesis_id": "h1",
+                            "todo_id": "t2",
+                        }
+                    ],
                     "insights": [
                         {
+                            "id": "i1",
                             "hypothesis_id": "h1",
                             "todo_id": "t2",
                             "insight": "Empty input already fails before token parsing",
@@ -213,6 +245,33 @@ async def test_dispatch_fix_issue_uses_runtime_session_worktree_and_persists_sdk
                             "impact": "confirm",
                         }
                     ],
+                    "comparisons": [
+                        {
+                            "id": "cmp1",
+                            "hypothesis_ids": ["h1"],
+                            "selected_hypothesis_id": "h1",
+                            "summary": "Single-path resolution",
+                            "status": "done",
+                        }
+                    ],
+                    "events": [
+                        {
+                            "id": "evt1",
+                            "kind": "compare_hypotheses",
+                            "status": "done",
+                            "summary": "Compared candidate paths",
+                            "comparison_id": "cmp1",
+                        },
+                        {
+                            "id": "evt2",
+                            "kind": "merge_solution",
+                            "status": "done",
+                            "summary": "Merged winning hypothesis onto session branch",
+                            "hypothesis_id": "h1",
+                            "branch_name": "catocode/session/runtime-session-1",
+                        },
+                    ],
+                    "selected_hypothesis_id": "h1",
                 },
             },
             metrics={"cost_usd": 0.5, "duration_ms": 1000, "turns": 4},
@@ -254,13 +313,35 @@ async def test_dispatch_fix_issue_uses_runtime_session_worktree_and_persists_sdk
     assert '"confirmed"' in runtime_session["resolution_state"]
     assert '"Empty input already fails before token parsing"' in runtime_session["resolution_state"]
     assert store.list_runtime_session_hypotheses(runtime_session_id) == [
-        {"id": "h1", "summary": "Validate empty token input", "status": "confirmed"}
+        {
+            "id": "h1",
+            "summary": "Validate empty token input",
+            "status": "confirmed",
+            "branch_name": "catocode/h1",
+            "selected": True,
+        }
     ]
     assert store.list_runtime_session_checkpoints(runtime_session_id) == [
-        {"id": "c2", "label": "verified-fix", "status": "done", "commit_sha": "abc123"}
+        {
+            "id": "base",
+            "label": "base",
+            "status": "done",
+            "commit_sha": "base123",
+            "hypothesis_id": None,
+            "todo_id": None,
+        },
+        {
+            "id": "c2",
+            "label": "verified-fix",
+            "status": "done",
+            "commit_sha": "abc123",
+            "hypothesis_id": "h1",
+            "todo_id": "t2",
+        }
     ]
     assert store.get_runtime_session_resolution(runtime_session_id)["insights"] == [
         {
+            "id": "i1",
             "hypothesis_id": "h1",
             "todo_id": "t2",
             "insight": "Empty input already fails before token parsing",
@@ -268,9 +349,23 @@ async def test_dispatch_fix_issue_uses_runtime_session_worktree_and_persists_sdk
             "impact": "confirm",
         }
     ]
+    resolution = store.get_runtime_session_resolution(runtime_session_id)
+    assert resolution["selected_hypothesis_id"] == "h1"
+    assert resolution["comparisons"][0]["id"] == "cmp1"
+    assert resolution["events"][0]["kind"] == "compare_hypotheses"
     steps = {step["step_key"]: step for step in store.list_activity_steps(activity_id)}
-    assert set(steps) == {"verification", "resolution", "checkpoint:verified-fix"}
-    assert steps["resolution"]["reason"] == "1 hypotheses, 1 todos, 1 checkpoints, 1 insights"
+    assert set(steps) == {
+        "verification",
+        "resolution",
+        "selected_hypothesis",
+        "comparison:cmp1",
+        "compare_hypotheses:evt1",
+        "merge_solution:evt2",
+        "checkpoint:verified-fix",
+        "checkpoint:base",
+    }
+    assert steps["resolution"]["reason"] == "1 hypotheses, 1 todos, 2 checkpoints, 1 insights"
+    assert steps["selected_hypothesis"]["reason"] == "h1"
     linked_pr_session = store.find_pr_runtime_session("owner-repo", 101)
     assert linked_pr_session is not None
     assert linked_pr_session["id"] == runtime_session_id

@@ -239,6 +239,26 @@ def test_api_activity_detail_includes_steps_runtime_session_and_runtime_result(t
             "hypotheses": [{"id": "h1", "summary": "Refresh CLAUDE.md after merge", "status": "confirmed"}],
             "todos": [{"id": "t1", "content": "Inspect merged diff", "status": "done"}],
             "checkpoints": [{"id": "c1", "label": "reviewed", "status": "done", "commit_sha": "abc123"}],
+            "insights": [{"id": "i1", "hypothesis_id": "h1", "insight": "Docs changed materially", "impact": "confirm"}],
+            "comparisons": [
+                {
+                    "id": "cmp1",
+                    "hypothesis_ids": ["h1"],
+                    "selected_hypothesis_id": "h1",
+                    "summary": "Single-path refresh",
+                    "status": "done",
+                }
+            ],
+            "events": [
+                {
+                    "id": "evt1",
+                    "kind": "merge_solution",
+                    "status": "done",
+                    "summary": "Selected h1 for repo memory refresh",
+                    "hypothesis_id": "h1",
+                }
+            ],
+            "selected_hypothesis_id": "h1",
         },
     )
     activity_id = store.add_activity(
@@ -281,6 +301,9 @@ def test_api_activity_detail_includes_steps_runtime_session_and_runtime_result(t
     assert data["runtime_session"]["id"] == session_id
     assert data["runtime_session"]["status"] == "needs_recovery"
     assert data["runtime_session"]["resolution_state"]["hypotheses"][0]["summary"] == "Refresh CLAUDE.md after merge"
+    assert data["runtime_session"]["resolution_state"]["selected_hypothesis_id"] == "h1"
+    assert data["runtime_session"]["resolution_state"]["comparisons"][0]["id"] == "cmp1"
+    assert data["runtime_session"]["resolution_state"]["events"][0]["kind"] == "merge_solution"
     assert data["runtime_session"]["latest_checkpoint"]["commit_sha"] == "abc123"
     assert data["runtime_result"]["summary"] == "Repo memory updated"
     assert data["runtime_result"]["writebacks"][0]["kind"] == "issue_comment"

@@ -161,6 +161,98 @@ def test_replace_runtime_session_resolution_persists_structured_records(store):
     ]
 
 
+def test_replace_runtime_session_resolution_persists_rich_working_memory(store):
+    store.add_repo("owner-repo", "https://github.com/owner/repo")
+    session_id = store.create_runtime_session(
+        repo_id="owner-repo",
+        entry_kind="fix_issue",
+        status="active",
+        worktree_path="/repos/.worktrees/owner-repo/session-rich-memory",
+        branch_name="catocode/session/session-rich-memory",
+        issue_number=42,
+    )
+
+    store.replace_runtime_session_resolution(
+        session_id,
+        {
+            "hypotheses": [
+                {
+                    "id": "h1",
+                    "summary": "Guard null input",
+                    "status": "selected",
+                    "branch_name": "catocode/h1",
+                    "selected": True,
+                },
+                {
+                    "id": "h2",
+                    "summary": "Normalize upstream",
+                    "status": "rejected",
+                    "branch_name": "catocode/h2",
+                },
+            ],
+            "todos": [
+                {
+                    "id": "t1",
+                    "hypothesis_id": "h1",
+                    "content": "Reproduce null input failure",
+                    "status": "done",
+                    "sequence": 1,
+                    "checkpoint_id": "c1",
+                }
+            ],
+            "checkpoints": [
+                {
+                    "id": "c1",
+                    "label": "before-fix",
+                    "status": "done",
+                    "commit_sha": "abc123",
+                    "hypothesis_id": "h1",
+                    "todo_id": "t1",
+                }
+            ],
+            "insights": [
+                {
+                    "id": "i1",
+                    "hypothesis_id": "h1",
+                    "todo_id": "t1",
+                    "insight": "Null guard avoids parser crash",
+                    "impact": "confirm",
+                }
+            ],
+            "comparisons": [
+                {
+                    "id": "cmp1",
+                    "hypothesis_ids": ["h1", "h2"],
+                    "selected_hypothesis_id": "h1",
+                    "summary": "h1 is smaller and passes verification",
+                    "status": "done",
+                }
+            ],
+            "events": [
+                {
+                    "id": "evt1",
+                    "kind": "compare_hypotheses",
+                    "status": "done",
+                    "summary": "Compared h1 and h2",
+                    "comparison_id": "cmp1",
+                }
+            ],
+            "selected_hypothesis_id": "h1",
+        },
+    )
+
+    assert store.get_runtime_session_selected_hypothesis(session_id)["id"] == "h1"
+    assert store.get_runtime_session_hypothesis(session_id, "h1")["branch_name"] == "catocode/h1"
+    assert store.get_runtime_session_todo(session_id, "t1")["checkpoint_id"] == "c1"
+    assert store.get_runtime_session_checkpoint_by_todo(session_id, "h1", "t1")["commit_sha"] == "abc123"
+    assert store.list_runtime_session_insights(session_id)[0]["insight"] == "Null guard avoids parser crash"
+    assert store.get_runtime_session_comparison(session_id, "cmp1")["selected_hypothesis_id"] == "h1"
+    resolution = store.get_runtime_session_resolution(session_id)
+    assert resolution["selected_hypothesis_id"] == "h1"
+    assert resolution["comparisons"][0]["id"] == "cmp1"
+    assert resolution["events"][0]["kind"] == "compare_hypotheses"
+
+
 def test_get_runtime_session_resolution_includes_json_only_insights(store):
     store.add_repo("owner-repo", "https://github.com/owner/repo")
     session_id = store.create_runtime_session(

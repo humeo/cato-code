@@ -111,6 +111,80 @@ def test_activity_result_envelope_validates_localization_artifacts():
     assert result.artifacts["localization"]["ranked_locations"][0]["rank"] == 1
 
 
+def test_activity_result_envelope_validates_resolution_artifacts():
+    result = ActivityResultEnvelope.from_dict(
+        {
+            "status": "done",
+            "summary": "Resolved issue with hypothesis workflow.",
+            "session": {"sdk_session_id": "sdk-123", "continued": True},
+            "writebacks": [],
+            "artifacts": {
+                "resolution": {
+                    "hypotheses": [
+                        {
+                            "id": "h1",
+                            "summary": "Guard empty input",
+                            "status": "selected",
+                            "branch_name": "catocode/h1",
+                            "selected": True,
+                        }
+                    ],
+                    "todos": [
+                        {
+                            "id": "t1",
+                            "hypothesis_id": "h1",
+                            "content": "Add regression",
+                            "status": "done",
+                            "sequence": 1,
+                        }
+                    ],
+                    "checkpoints": [
+                        {
+                            "id": "c1",
+                            "label": "checkpoint: regression",
+                            "status": "done",
+                            "commit_sha": "abc123",
+                            "hypothesis_id": "h1",
+                            "todo_id": "t1",
+                        }
+                    ],
+                    "insights": [
+                        {
+                            "hypothesis_id": "h1",
+                            "todo_id": "t1",
+                            "insight": "Parser fails before auth dispatch",
+                            "source": "verification",
+                            "impact": "confirm",
+                        }
+                    ],
+                    "comparisons": [
+                        {
+                            "hypothesis_ids": ["h1"],
+                            "selected_hypothesis_id": "h1",
+                            "summary": "Single-path resolution",
+                            "status": "done",
+                        }
+                    ],
+                    "events": [
+                        {
+                            "kind": "merge_solution",
+                            "status": "done",
+                            "summary": "Merged h1 onto session branch",
+                            "hypothesis_id": "h1",
+                            "branch_name": "catocode/h1",
+                        }
+                    ],
+                    "selected_hypothesis_id": "h1",
+                }
+            },
+            "metrics": {"cost_usd": 0.42, "duration_ms": 1234, "turns": 4},
+        }
+    )
+
+    assert result.artifacts["resolution"]["selected_hypothesis_id"] == "h1"
+    assert result.artifacts["resolution"]["events"][0]["kind"] == "merge_solution"
+
+
 def test_activity_result_envelope_rejects_invalid_localization_artifacts():
     with pytest.raises(InvalidActivityResultEnvelope):
         ActivityResultEnvelope.from_dict(
