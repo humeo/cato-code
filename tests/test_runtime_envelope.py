@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from catocode.localization_artifact import LocalizationArtifact
 from catocode.runtime_envelope import (
     ActivityEnvelope,
     ActivityResultEnvelope,
@@ -70,6 +71,116 @@ def test_activity_result_envelope_validates_required_fields():
     assert result.summary == "Fixed issue and opened a PR."
     assert result.session["sdk_session_id"] == "sdk-123"
     assert result.writebacks[0]["kind"] == "pr_opened"
+
+
+def test_activity_result_envelope_validates_localization_artifacts():
+    result = ActivityResultEnvelope.from_dict(
+        {
+            "status": "done",
+            "summary": "Localized the issue.",
+            "session": {"sdk_session_id": "sdk-123", "continued": True},
+            "writebacks": [],
+            "artifacts": {
+                "localization": LocalizationArtifact.from_dict(
+                    {
+                        "entry_points": ["Query.values"],
+                        "explored_paths": [],
+                        "candidate_locations": [],
+                        "ranked_locations": [
+                            {
+                                "rank": 1,
+                                "file_path": "django/db/models/sql/query.py",
+                                "line_start": 825,
+                                "line_end": 829,
+                                "role": "cause",
+                                "summary": "values delegates to _values",
+                                "why_relevant": "Issue mentions ambiguous status lookup",
+                                "symbol_name": None,
+                                "symbol_kind": None,
+                            }
+                        ],
+                        "finish_reason": "sufficient_context",
+                        "search_metrics": {"explored_units": 3},
+                    }
+                ).to_dict()
+            },
+            "metrics": {"cost_usd": 0.42, "duration_ms": 1234, "turns": 4},
+        }
+    )
+
+    assert result.artifacts["localization"]["ranked_locations"][0]["rank"] == 1
+
+
+def test_activity_result_envelope_rejects_invalid_localization_artifacts():
+    with pytest.raises(InvalidActivityResultEnvelope):
+        ActivityResultEnvelope.from_dict(
+            {
+                "status": "done",
+                "summary": "Localized the issue.",
+                "session": {"sdk_session_id": "sdk-123", "continued": True},
+                "writebacks": [],
+                "artifacts": {
+                    "localization": {
+                        "entry_points": ["Query.values"],
+                        "explored_paths": [],
+                        "candidate_locations": [],
+                        "ranked_locations": [],
+                        "finish_reason": "sufficient_context",
+                        "search_metrics": {"explored_units": 3},
+                    }
+                },
+                "metrics": {"cost_usd": 0.42, "duration_ms": 1234, "turns": 4},
+            }
+        )
+
+
+def test_activity_result_envelope_rejects_invalid_localization_artifact_instance():
+    class MalformedLocalizationArtifact(LocalizationArtifact):
+        def to_dict(self) -> dict[str, object]:
+            return {
+                "entry_points": ["Query.values"],
+                "explored_paths": [],
+                "candidate_locations": [],
+                "ranked_locations": [
+                    {
+                        "rank": 1,
+                        "file_path": "django/db/models/sql/query.py",
+                        "line_start": 825,
+                        "line_end": 829,
+                        "role": "cause",
+                        "summary": "values delegates to _values",
+                        "why_relevant": "Issue mentions ambiguous status lookup",
+                    }
+                ],
+                "finish_reason": "sufficient_context",
+                "search_metrics": {"explored_units": 3},
+            }
+
+    with pytest.raises(InvalidActivityResultEnvelope):
+        ActivityResultEnvelope.from_dict(
+            {
+                "status": "done",
+                "summary": "Localized the issue.",
+                "session": {"sdk_session_id": "sdk-123", "continued": True},
+                "writebacks": [],
+                "artifacts": {"localization": MalformedLocalizationArtifact([], [], [], [], "sufficient_context", {})},
+                "metrics": {"cost_usd": 0.42, "duration_ms": 1234, "turns": 4},
+            }
+        )
+
+
+def test_activity_result_envelope_rejects_null_localization_artifact():
+    with pytest.raises(InvalidActivityResultEnvelope):
+        ActivityResultEnvelope.from_dict(
+            {
+                "status": "done",
+                "summary": "Localized the issue.",
+                "session": {"sdk_session_id": "sdk-123", "continued": True},
+                "writebacks": [],
+                "artifacts": {"localization": None},
+                "metrics": {"cost_usd": 0.42, "duration_ms": 1234, "turns": 4},
+            }
+        )
 
 
 def test_activity_result_envelope_rejects_missing_required_fields():

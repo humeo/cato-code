@@ -11,6 +11,7 @@ from .codebase_graph_runtime import prepare_codebase_graph_runtime
 from .config import parse_repo_url
 from .github.commenter import failure_comment, post_issue_comment
 from .github.issue_fetcher import fetch_issue
+from .localization_artifact import LocalizationArtifact
 from .runtime_envelope import ActivityEnvelope, ActivityResultEnvelope, InvalidActivityResultEnvelope
 from .session_runtime import (
     finalize_runtime_session,
@@ -1210,6 +1211,9 @@ def _build_activity_envelope(
     resolution_memory = _load_runtime_session_resolution(store, runtime_session)
     if resolution_memory is not None:
         memory["resolution"] = resolution_memory
+    localization_memory = _load_latest_localization_artifact(store, runtime_session["id"])
+    if localization_memory is not None:
+        memory["localization"] = localization_memory
 
     return ActivityEnvelope(
         activity={
@@ -1259,6 +1263,36 @@ def _build_activity_envelope(
         },
         memory=memory,
     )
+
+
+def _load_latest_localization_artifact(store: Store, runtime_session_id: str) -> dict | None:
+    if not isinstance(runtime_session_id, str):
+        return None
+
+    for candidate in reversed(store.list_activities()):
+        if candidate.get("session_id") != runtime_session_id:
+            continue
+        raw_metadata = candidate.get("metadata")
+        if not raw_metadata:
+            continue
+        try:
+            metadata = json.loads(raw_metadata)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        runtime_result = metadata.get("runtime_result")
+        if not isinstance(runtime_result, dict):
+            continue
+        artifacts = runtime_result.get("artifacts")
+        if not isinstance(artifacts, dict):
+            continue
+        localization = artifacts.get("localization")
+        if localization is None:
+            continue
+        try:
+            return LocalizationArtifact.from_dict(localization).to_dict()
+        except Exception:
+            continue
+    return None
 
 
 def _append_activity_envelope(prompt: str, envelope: ActivityEnvelope) -> str:

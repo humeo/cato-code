@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from .localization_artifact import InvalidLocalizationArtifact, LocalizationArtifact
+
 
 class InvalidActivityResultEnvelope(ValueError):
     """Raised when Claude returns a malformed result envelope."""
@@ -69,6 +71,15 @@ class ActivityResultEnvelope:
         artifacts = payload["artifacts"]
         if not isinstance(artifacts, dict):
             raise InvalidActivityResultEnvelope("ActivityResultEnvelope.artifacts must be an object")
+        normalized_artifacts = dict(artifacts)
+        if "localization" in normalized_artifacts:
+            localization = normalized_artifacts["localization"]
+            try:
+                if isinstance(localization, LocalizationArtifact):
+                    localization = localization.to_dict()
+                normalized_artifacts["localization"] = LocalizationArtifact.from_dict(localization).to_dict()
+            except InvalidLocalizationArtifact as exc:
+                raise InvalidActivityResultEnvelope(str(exc)) from exc
 
         metrics = payload["metrics"]
         if not isinstance(metrics, dict):
@@ -79,7 +90,7 @@ class ActivityResultEnvelope:
             summary=summary,
             session=dict(session),
             writebacks=normalized_writebacks,
-            artifacts=dict(artifacts),
+            artifacts=normalized_artifacts,
             metrics=dict(metrics),
         )
 
