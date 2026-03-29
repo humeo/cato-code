@@ -1331,6 +1331,7 @@ def _normalize_resolution_state(runtime_result: ActivityResultEnvelope) -> dict 
         "hypotheses": _normalize_items("hypotheses"),
         "todos": _normalize_items("todos"),
         "checkpoints": _normalize_items("checkpoints"),
+        "insights": _normalize_items("insights"),
     }
     if any(normalized.values()):
         return normalized

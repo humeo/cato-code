@@ -143,10 +143,13 @@ Follow the step-by-step workflow in this skill. Remember:
 3. Layer 1 evidence is MANDATORY before fixing
 4. Layer 2 evidence is MANDATORY before creating PR
 5. Include the Evidence table in your PR description
-6. Stay on the existing session branch inside the current worktree; do not create a new issue branch
-7. Create semantic checkpoint commits and include them in `artifacts.resolution.checkpoints`
-8. Finish with a valid `ActivityResultEnvelope` JSON object as the final result text
-9. Include `writebacks`, `artifacts.verification`, and `artifacts.resolution` with hypotheses, todos, and checkpoints
+6. Use `Activity Envelope.memory.localization.ranked_locations` as your primary ranked handoff when localization hints are present
+7. Drive planning updates through `hypothesis_plan update_hypothesis`, `hypothesis_plan update_todo`, and `hypothesis_plan log_insight`
+8. Drive git control through `hypothesis_git init_base`, `create_branch`, `commit_todo`, `revert_to`, `compare_hypotheses`, and `merge_solution`
+9. Keep the session branch as the canonical branch for this worktree; if you create hypothesis branches, treat them as temporary resolution branches only
+10. Follow the paper rule: one todo = one action = one checkpoint commit
+11. Finish with a valid `ActivityResultEnvelope` JSON object as the final result text
+12. Include `writebacks`, `artifacts.verification`, and `artifacts.resolution` with hypotheses, todos, checkpoints, and insights
 
 Begin now.
 """

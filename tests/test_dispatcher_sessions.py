@@ -204,6 +204,15 @@ async def test_dispatch_fix_issue_uses_runtime_session_worktree_and_persists_sdk
                     "hypotheses": [{"id": "h1", "summary": "Validate empty token input", "status": "confirmed"}],
                     "todos": [{"id": "t2", "content": "Run regression suite", "status": "done"}],
                     "checkpoints": [{"id": "c2", "label": "verified-fix", "status": "done", "commit_sha": "abc123"}],
+                    "insights": [
+                        {
+                            "hypothesis_id": "h1",
+                            "todo_id": "t2",
+                            "insight": "Empty input already fails before token parsing",
+                            "source": "verification",
+                            "impact": "confirm",
+                        }
+                    ],
                 },
             },
             metrics={"cost_usd": 0.5, "duration_ms": 1000, "turns": 4},
@@ -243,11 +252,21 @@ async def test_dispatch_fix_issue_uses_runtime_session_worktree_and_persists_sdk
     assert runtime_session["sdk_session_id"] == "sdk-new"
     assert runtime_session["last_activity_at"] is not None
     assert '"confirmed"' in runtime_session["resolution_state"]
+    assert '"Empty input already fails before token parsing"' in runtime_session["resolution_state"]
     assert store.list_runtime_session_hypotheses(runtime_session_id) == [
         {"id": "h1", "summary": "Validate empty token input", "status": "confirmed"}
     ]
     assert store.list_runtime_session_checkpoints(runtime_session_id) == [
         {"id": "c2", "label": "verified-fix", "status": "done", "commit_sha": "abc123"}
+    ]
+    assert store.get_runtime_session_resolution(runtime_session_id)["insights"] == [
+        {
+            "hypothesis_id": "h1",
+            "todo_id": "t2",
+            "insight": "Empty input already fails before token parsing",
+            "source": "verification",
+            "impact": "confirm",
+        }
     ]
     linked_pr_session = store.find_pr_runtime_session("owner-repo", 101)
     assert linked_pr_session is not None

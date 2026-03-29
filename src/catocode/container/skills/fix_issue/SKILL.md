@@ -29,21 +29,44 @@ Use the internal `codebase_graph` skill for structured code navigation instead o
 4. Verify all important findings by reading the real source and tests.
 5. If `cg` is unavailable or does not help, fall back to normal repo exploration and continue.
 
+If the `Activity Envelope` includes `memory.localization.ranked_locations`, treat those ranked locations as your primary starting points. Use them first, then expand with `cg` only as needed.
+
+## Paper-Native Resolution Tools
+
+Use the dedicated planning and git control tools instead of keeping the whole workflow implicit in free-form notes.
+
+### `hypothesis_plan`
+
+- `hypothesis_plan update_hypothesis ...` to create or refine the active hypothesis
+- `hypothesis_plan update_todo ...` to maintain the todo list
+- `hypothesis_plan log_insight ...` to capture verification or debugging learnings
+
+### `hypothesis_git`
+
+- `hypothesis_git init_base ...` to record the base commit before risky work
+- `hypothesis_git create_branch ...` to create a temporary hypothesis branch when you need to explore an alternate resolution path
+- `hypothesis_git commit_todo ...` to create a semantic checkpoint for a single todo
+- `hypothesis_git revert_to ...` to resume from a prior semantic checkpoint
+- `hypothesis_git compare_hypotheses` to summarize explored paths before selecting the winning fix
+- `hypothesis_git merge_solution ...` to merge the winning hypothesis back into the session branch before the final PR flow
+
 ## Session Branch and Semantic Checkpoints
 
-You are running inside a dedicated CatoCode session worktree. Do **not** create a new branch for this issue.
+You are running inside a dedicated CatoCode session worktree. The session branch is the canonical branch for this issue.
 
 1. Stay on the existing **session branch** and use the current worktree as your isolated workspace.
-2. Maintain a single active hypothesis and a short todo list as you work.
-3. Create a **semantic checkpoint** after any meaningful milestone, especially:
+2. Maintain an explicit active hypothesis and short todo list via `hypothesis_plan`.
+3. Use temporary hypothesis branches only when you need to compare alternate solutions. Merge the winning path back into the session branch before creating the PR.
+4. Create a **semantic checkpoint** after any meaningful milestone, especially:
    - after successful reproduction
    - after a risky refactor or intermediate fix
    - after final verification passes
-4. A semantic checkpoint should be a real git commit on the session branch with a clear message such as:
+5. A semantic checkpoint should be a real git commit with a clear message such as:
    - `checkpoint: reproduced issue 123`
    - `checkpoint: passing targeted regression`
-5. Include each checkpoint's label and commit SHA in your final `artifacts.resolution.checkpoints`.
-6. If this session already contains prior hypotheses, todos, or checkpoints, continue from them instead of restarting from scratch.
+6. Follow the paper rule: **one todo = one action = one checkpoint commit**.
+7. Include each checkpoint's label and commit SHA in your final `artifacts.resolution.checkpoints`.
+8. If this session already contains prior hypotheses, todos, checkpoints, or insights, continue from them instead of restarting from scratch.
 
 ## The Two-Layer Evidence Protocol
 
@@ -120,18 +143,30 @@ pkill -f "node.*start"
 
 **Checkpoint**: Verify that `/tmp/evidence-before.txt` (or `.png`) contains clear evidence of the bug.
 
-### Step 3: Write the Fix
+### Step 3: Initialize the Resolution Loop
 
-Now that you've proven the bug exists, write a **minimal, targeted fix**:
+1. Call `hypothesis_git init_base --label "base"` before risky edits.
+2. Create or refresh the active hypothesis with `hypothesis_plan update_hypothesis`.
+3. Create an initial 2-4 item todo list with `hypothesis_plan update_todo`.
+4. If the first hypothesis fails badly, log the failure with `hypothesis_plan log_insight` and either refine the same hypothesis or create a temporary alternate hypothesis branch with `hypothesis_git create_branch`.
+
+### Step 4: Execute Todos One by One
+
+Now that you've proven the bug exists, execute a **minimal, targeted fix**:
 
 - Only change what's necessary to fix the issue
 - Follow the repo's conventions (check CLAUDE.md for linting, formatting rules)
 - Don't refactor unrelated code
 - Add comments if the fix is non-obvious
 
-Stay on the existing session branch. Do **not** create a new issue branch inside the worktree.
+For each meaningful todo:
 
-### Step 4: Layer 2 — Verify
+1. Perform exactly one action for that todo.
+2. Create a semantic checkpoint with `hypothesis_git commit_todo`.
+3. Update the todo status with `hypothesis_plan update_todo`.
+4. If a todo fails or sends you down the wrong path, use `hypothesis_plan log_insight` and `hypothesis_git revert_to` to return to the last good semantic checkpoint.
+
+### Step 5: Layer 2 — Verify
 
 Run the same reproduction steps again to prove the fix works:
 
@@ -148,7 +183,15 @@ pytest 2>&1 | tee /tmp/test-suite-after.txt
 - `/tmp/evidence-after.txt` shows the bug is fixed
 - `/tmp/test-suite-after.txt` shows all tests pass (no regressions)
 
-### Step 5: Checkpoint and Commit
+### Step 6: Compare and Select the Winning Resolution
+
+Before the final PR flow:
+
+1. If you explored more than one hypothesis path, run `hypothesis_git compare_hypotheses`.
+2. Merge the winning solution back to the session branch with `hypothesis_git merge_solution`.
+3. Log any final insight that explains why the winning path worked.
+
+### Step 7: Checkpoint and Commit
 
 Before the final fix commit, create at least one semantic checkpoint commit if you have not already done so for this session.
 
@@ -161,7 +204,7 @@ Example: `git commit -m "fix: handle null email in user login (#123)"`
 
 Add `Co-Authored-By: Claude <noreply@anthropic.com>` to the commit message.
 
-### Step 6: Create Pull Request
+### Step 8: Create Pull Request
 
 Before creating the PR, push the current session branch explicitly so `gh` never falls back to an interactive "where should I push?" prompt:
 
@@ -269,6 +312,7 @@ Your final result text must be a valid `ActivityResultEnvelope` JSON object. In 
 - `hypotheses`
 - `todos`
 - `checkpoints`
+- `insights`
 
 Each semantic checkpoint should include a `label`, `status`, and `commit_sha`.
 

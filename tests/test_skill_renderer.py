@@ -82,6 +82,9 @@ def test_build_fix_issue_prompt():
     assert "artifacts.resolution" in prompt
     assert "session branch" in prompt.lower()
     assert "checkpoint" in prompt.lower()
+    assert "hypothesis_plan" in prompt
+    assert "hypothesis_git" in prompt
+    assert "ranked_locations" in prompt
     assert "repocraft/fix" not in prompt
 
 
@@ -171,3 +174,17 @@ def test_fix_issue_skill_pushes_branch_before_creating_pr():
     skill = read_skill("fix_issue")
     assert "git push --set-upstream origin" in skill
     assert "--head" in skill
+
+
+def test_fix_issue_skill_uses_paper_resolution_workflow():
+    skill = read_skill("fix_issue")
+    lower = skill.lower()
+    assert "hypothesis_plan" in skill
+    assert "hypothesis_git" in skill
+    assert "init_base" in skill
+    assert "commit_todo" in skill
+    assert "revert_to" in skill
+    assert "compare_hypotheses" in skill
+    assert "merge_solution" in skill
+    assert "ranked location" in lower or "ranked_locations" in skill
+    assert "one todo = one action = one checkpoint commit" in lower
