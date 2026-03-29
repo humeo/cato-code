@@ -152,3 +152,26 @@ def test_reset_checkout_supports_restoring_checkpoint_ref():
     assert commands == [
         ("git reset --hard abc123 && git clean -fdx", "/repos/.worktrees/owner-repo/session-123"),
     ]
+
+
+def test_exec_resolution_tool_invokes_named_cli():
+    manager = object.__new__(ContainerManager)
+    commands: list[tuple[str, str]] = []
+
+    def fake_exec(command: str, workdir: str = "/repos", github_token: str | None = None) -> ExecResult:
+        commands.append((command, workdir))
+        return ExecResult(exit_code=0, stdout='{"ok": true}', stderr="")
+
+    manager.exec = fake_exec  # type: ignore[attr-defined]
+
+    result = ContainerManager.exec_resolution_tool(
+        manager,
+        "hypothesis_git",
+        ["compare_hypotheses", "--format", "json"],
+        workdir="/repos/.worktrees/owner-repo/session-123",
+    )
+
+    assert result.exit_code == 0
+    assert commands == [
+        ("hypothesis_git compare_hypotheses --format json", "/repos/.worktrees/owner-repo/session-123"),
+    ]

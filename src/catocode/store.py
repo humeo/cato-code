@@ -1064,6 +1064,17 @@ class Store:
             return None
         return json.loads(row["payload"])
 
+    def get_runtime_session_checkpoint_by_todo(
+        self,
+        session_id: str,
+        hypothesis_id: str,
+        todo_id: str,
+    ) -> dict | None:
+        for checkpoint in self.list_runtime_session_checkpoints(session_id):
+            if checkpoint.get("hypothesis_id") == hypothesis_id and checkpoint.get("todo_id") == todo_id:
+                return checkpoint
+        return None
+
     def get_runtime_session_resolution(self, session_id: str) -> dict | None:
         session = self.get_runtime_session(session_id)
         if session is None:
@@ -1091,9 +1102,9 @@ class Store:
             return None
 
         return {
-            "hypotheses": hypotheses or list(parsed_resolution_state.get("hypotheses", [])) if parsed_resolution_state else hypotheses,
-            "todos": todos or list(parsed_resolution_state.get("todos", [])) if parsed_resolution_state else todos,
-            "checkpoints": checkpoints or list(parsed_resolution_state.get("checkpoints", [])) if parsed_resolution_state else checkpoints,
+            "hypotheses": hypotheses or (list(parsed_resolution_state.get("hypotheses", [])) if parsed_resolution_state else []),
+            "todos": todos or (list(parsed_resolution_state.get("todos", [])) if parsed_resolution_state else []),
+            "checkpoints": checkpoints or (list(parsed_resolution_state.get("checkpoints", [])) if parsed_resolution_state else []),
             "insights": insights,
         }
 

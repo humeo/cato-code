@@ -232,6 +232,18 @@ class ContainerManager:
         logger.debug("exec [%d]: %s", exit_code, command[:80])
         return ExecResult(exit_code=exit_code, stdout=stdout, stderr=stderr)
 
+    def exec_resolution_tool(
+        self,
+        tool_name: str,
+        tool_args: list[str],
+        *,
+        workdir: str = "/repos",
+        github_token: str | None = None,
+    ) -> ExecResult:
+        quoted_args = " ".join(shlex.quote(arg) for arg in tool_args)
+        command = tool_name if not quoted_args else f"{tool_name} {quoted_args}"
+        return self.exec(command, workdir=workdir, github_token=github_token)
+
     async def exec_stream(
         self,
         command: str,

@@ -57,14 +57,16 @@ RUN uv pip install --system /app/vendor/codebase-graph
 COPY scripts/run_activity.py /app/run_activity.py
 COPY scripts/localization_cli.py /app/localization_cli.py
 COPY scripts/hypothesis_plan.py /app/hypothesis_plan.py
-RUN chmod +x /app/run_activity.py /app/localization_cli.py /app/hypothesis_plan.py \
+COPY scripts/hypothesis_git.py /app/hypothesis_git.py
+RUN chmod +x /app/run_activity.py /app/localization_cli.py /app/hypothesis_plan.py /app/hypothesis_git.py \
     && ln -sf /app/localization_cli.py /usr/local/bin/find_file \
     && ln -sf /app/localization_cli.py /usr/local/bin/find_code_def \
     && ln -sf /app/localization_cli.py /usr/local/bin/find_code_content \
     && ln -sf /app/localization_cli.py /usr/local/bin/find_child_unit \
     && ln -sf /app/localization_cli.py /usr/local/bin/finish_search \
     && ln -sf /app/hypothesis_plan.py /usr/local/bin/hypothesis_plan \
-    && chown catocode:catocode /app/run_activity.py /app/localization_cli.py /app/hypothesis_plan.py
+    && ln -sf /app/hypothesis_git.py /usr/local/bin/hypothesis_git \
+    && chown catocode:catocode /app/run_activity.py /app/localization_cli.py /app/hypothesis_plan.py /app/hypothesis_git.py
 
 # Layer 12: Copy RepoCraft skills to container
 COPY skills/ /home/catocode/.claude/skills/
